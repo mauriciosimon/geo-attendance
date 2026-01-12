@@ -9,52 +9,70 @@ import {
   ScrollView,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { ACTIVE_GEOFENCE } from '../config/constants';
-import {
-  isWithinGeofence,
-  getGeofenceStatus,
-  formatDistance,
-} from '../utils/geofencing';
+import { useFocusEffect } from '@react-navigation/native';
+import { calculateDistance, formatDistance } from '../utils/geofencing';
 import { recordAttendance, getLastAttendanceStatus } from '../services/attendanceService';
-import { saveLocation } from '../services/locationService';
-import { Coordinates, AttendanceStatus, LocationState, GeoFence } from '../types';
-
-type RootStackParamList = {
-  Attendance: undefined;
-  History: undefined;
-};
-
-type AttendanceScreenProps = {
-  navigation: NativeStackNavigationProp<RootStackParamList, 'Attendance'>;
-};
+import { getLocations } from '../services/locationsService';
+import { Coordinates, AttendanceStatus, Location as LocationType, NearbyLocation } from '../types';
 
 const TEMP_USER_ID = 'user-123';
 
-export default function AttendanceScreen({ navigation }: AttendanceScreenProps) {
-  const [locationState, setLocationState] = useState<LocationState>({
-    coordinates: null,
-    isWithinFence: false,
-    distanceFromCenter: null,
-    error: null,
-    loading: true,
-  });
+export default function AttendanceScreen() {
+  const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [lastStatus, setLastStatus] = useState<AttendanceStatus | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSavingLocation, setIsSavingLocation] = useState(false);
-  const [currentGeofence, setCurrentGeofence] = useState<GeoFence>(ACTIVE_GEOFENCE);
+  const [allLocations, setAllLocations] = useState<LocationType[]>([]);
+  const [nearbyLocations, setNearbyLocations] = useState<NearbyLocation[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<NearbyLocation | null>(null);
+
+  const fetchLocations = useCallback(async () => {
+    const { locations } = await getLocations();
+    setAllLocations(locations);
+  }, []);
+
+  // Refresh locations when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchLocations();
+    }, [fetchLocations])
+  );
+
+  const calculateNearbyLocations = useCallback(
+    (userCoords: Coordinates) => {
+      const nearby: NearbyLocation[] = allLocations.map((loc) => {
+        const distance = calculateDistance(userCoords, {
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+        });
+        return {
+          ...loc,
+          distance,
+          isInside: distance <= loc.radius_meters,
+        };
+      });
+
+      // Sort by distance
+      nearby.sort((a, b) => a.distance - b.distance);
+      setNearbyLocations(nearby);
+
+      // Auto-select the closest location user is inside
+      const insideLocation = nearby.find((loc) => loc.isInside);
+      setSelectedLocation(insideLocation || null);
+    },
+    [allLocations]
+  );
 
   const fetchLocation = useCallback(async () => {
-    setLocationState((prev) => ({ ...prev, loading: true, error: null }));
+    setLoading(true);
+    setError(null);
 
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        setLocationState((prev) => ({
-          ...prev,
-          loading: false,
-          error: 'Location permission denied',
-        }));
+        setError('Location permission denied');
+        setLoading(false);
         return;
       }
 
@@ -67,23 +85,14 @@ export default function AttendanceScreen({ navigation }: AttendanceScreenProps) 
         longitude: location.coords.longitude,
       };
 
-      const geofenceStatus = getGeofenceStatus(coords, currentGeofence);
-
-      setLocationState({
-        coordinates: coords,
-        isWithinFence: geofenceStatus.isInside,
-        distanceFromCenter: geofenceStatus.distance,
-        error: null,
-        loading: false,
-      });
-    } catch (error) {
-      setLocationState((prev) => ({
-        ...prev,
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to get location',
-      }));
+      setCoordinates(coords);
+      calculateNearbyLocations(coords);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to get location');
+    } finally {
+      setLoading(false);
     }
-  }, [currentGeofence]);
+  }, [calculateNearbyLocations]);
 
   const fetchLastStatus = useCallback(async () => {
     const { status } = await getLastAttendanceStatus(TEMP_USER_ID);
@@ -91,13 +100,19 @@ export default function AttendanceScreen({ navigation }: AttendanceScreenProps) 
   }, []);
 
   useEffect(() => {
-    fetchLocation();
+    fetchLocations();
     fetchLastStatus();
-  }, [fetchLocation, fetchLastStatus]);
+  }, [fetchLocations, fetchLastStatus]);
+
+  useEffect(() => {
+    if (allLocations.length >= 0) {
+      fetchLocation();
+    }
+  }, [allLocations, fetchLocation]);
 
   const handleCheckInOut = async () => {
-    if (!locationState.coordinates || !locationState.isWithinFence) {
-      Alert.alert('Error', 'You must be within the geofence to check in/out');
+    if (!coordinates || !selectedLocation) {
+      Alert.alert('Error', 'You must be inside a location to check in/out');
       return;
     }
 
@@ -107,191 +122,139 @@ export default function AttendanceScreen({ navigation }: AttendanceScreenProps) 
     setIsSubmitting(true);
 
     try {
-      const { error } = await recordAttendance(
+      const { error: err } = await recordAttendance(
         TEMP_USER_ID,
         newStatus,
-        locationState.coordinates
+        coordinates
       );
 
-      if (error) {
-        Alert.alert('Error', error.message);
+      if (err) {
+        Alert.alert('Error', err.message);
         return;
       }
 
       setLastStatus(newStatus);
       Alert.alert(
         'Success',
-        `${newStatus === 'check_in' ? 'Checked in' : 'Checked out'} successfully!`
+        `${newStatus === 'check_in' ? 'Checked in' : 'Checked out'} at ${selectedLocation.name}!`
       );
-    } catch (error) {
+    } catch (err) {
       Alert.alert('Error', 'Failed to record attendance');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleUpdateGeofence = () => {
-    if (!locationState.coordinates) {
-      Alert.alert('Error', 'No location available');
-      return;
-    }
-
-    const newGeofence: GeoFence = {
-      ...currentGeofence,
-      center: locationState.coordinates,
-    };
-
-    setCurrentGeofence(newGeofence);
-
-    // Recalculate fence status with new center
-    const geofenceStatus = getGeofenceStatus(locationState.coordinates, newGeofence);
-    setLocationState((prev) => ({
-      ...prev,
-      isWithinFence: geofenceStatus.isInside,
-      distanceFromCenter: geofenceStatus.distance,
-    }));
-
-    Alert.alert(
-      'Geofence Updated',
-      `New center: ${locationState.coordinates.latitude.toFixed(6)}, ${locationState.coordinates.longitude.toFixed(6)}`
-    );
-  };
-
-  const handleSaveLocation = async () => {
-    if (!locationState.coordinates) {
-      Alert.alert('Error', 'No location available');
-      return;
-    }
-
-    setIsSavingLocation(true);
-
-    try {
-      const { error } = await saveLocation(
-        TEMP_USER_ID,
-        locationState.coordinates,
-        `Location saved at ${new Date().toLocaleTimeString()}`
-      );
-
-      if (error) {
-        Alert.alert('Error', error.message);
-        return;
-      }
-
-      Alert.alert('Success', 'Location saved!');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to save location');
-    } finally {
-      setIsSavingLocation(false);
-    }
-  };
-
   const getButtonText = (): string => {
-    if (!locationState.isWithinFence) return 'Outside Geofence';
+    if (!selectedLocation) return 'Not Inside Any Location';
     if (lastStatus === 'check_in') return 'Check Out';
     return 'Check In';
   };
 
-  const getStatusColor = (): string => {
-    if (locationState.isWithinFence) return '#4CAF50';
-    return '#f44336';
-  };
+  const insideLocations = nearbyLocations.filter((loc) => loc.isInside);
+  const outsideLocations = nearbyLocations.filter((loc) => !loc.isInside);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Text style={styles.title}>Attendance</Text>
-      <Text style={styles.subtitle}>{currentGeofence.name}</Text>
+      <Text style={styles.title}>Check In</Text>
+      <Text style={styles.subtitle}>
+        {allLocations.length === 0
+          ? 'No locations configured'
+          : `${allLocations.length} location(s) available`}
+      </Text>
 
-      {/* Location Status Card */}
+      {/* Current Location Card */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Location Status</Text>
+        <Text style={styles.cardTitle}>Your Location</Text>
 
-        {locationState.loading ? (
+        {loading ? (
           <ActivityIndicator size="large" color="#007AFF" />
-        ) : locationState.error ? (
-          <Text style={styles.errorText}>{locationState.error}</Text>
-        ) : (
+        ) : error ? (
+          <Text style={styles.errorText}>{error}</Text>
+        ) : coordinates ? (
           <>
-            <View
-              style={[
-                styles.statusIndicator,
-                { backgroundColor: getStatusColor() },
-              ]}
-            >
-              <Text style={styles.statusText}>
-                {locationState.isWithinFence ? 'Inside' : 'Outside'}
-              </Text>
-            </View>
-
-            {locationState.distanceFromCenter !== null && (
-              <Text style={styles.distanceText}>
-                {formatDistance(locationState.distanceFromCenter)} from center
-              </Text>
-            )}
-
-            <Text style={styles.radiusText}>
-              Allowed radius: {formatDistance(currentGeofence.radiusMeters)}
+            <Text style={styles.coordsText}>
+              {coordinates.latitude.toFixed(6)}, {coordinates.longitude.toFixed(6)}
             </Text>
-
-            {locationState.coordinates && (
-              <Text style={styles.coordsText}>
-                {locationState.coordinates.latitude.toFixed(6)},{' '}
-                {locationState.coordinates.longitude.toFixed(6)}
-              </Text>
-            )}
           </>
-        )}
+        ) : null}
 
         <TouchableOpacity
           style={styles.refreshButton}
           onPress={fetchLocation}
-          disabled={locationState.loading}
+          disabled={loading}
         >
           <Text style={styles.refreshButtonText}>Refresh Location</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Geofence Settings Card */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Geofence Settings</Text>
+      {/* Nearby Locations Card */}
+      {allLocations.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Nearby Locations</Text>
 
-        <Text style={styles.infoText}>
-          Current Center: {currentGeofence.center.latitude.toFixed(6)}, {currentGeofence.center.longitude.toFixed(6)}
-        </Text>
-
-        <TouchableOpacity
-          style={styles.settingsButton}
-          onPress={handleUpdateGeofence}
-          disabled={!locationState.coordinates || locationState.loading}
-        >
-          <Text style={styles.settingsButtonText}>Set Current Location as Center</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.settingsButton, styles.saveButton]}
-          onPress={handleSaveLocation}
-          disabled={!locationState.coordinates || isSavingLocation}
-        >
-          {isSavingLocation ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.saveButtonText}>Save Current Location</Text>
+          {insideLocations.length > 0 && (
+            <>
+              <Text style={styles.sectionLabel}>You are inside:</Text>
+              {insideLocations.map((loc) => (
+                <TouchableOpacity
+                  key={loc.id}
+                  style={[
+                    styles.locationItem,
+                    styles.locationInside,
+                    selectedLocation?.id === loc.id && styles.locationSelected,
+                  ]}
+                  onPress={() => setSelectedLocation(loc)}
+                >
+                  <View style={styles.locationInfo}>
+                    <Text style={styles.locationName}>{loc.name}</Text>
+                    <Text style={styles.locationDistance}>
+                      {formatDistance(loc.distance)} from center
+                    </Text>
+                  </View>
+                  <View style={styles.insideBadge}>
+                    <Text style={styles.insideBadgeText}>Inside</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </>
           )}
-        </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.historyButton}
-          onPress={() => navigation.navigate('History')}
-        >
-          <Text style={styles.historyButtonText}>View Saved Locations</Text>
-        </TouchableOpacity>
-      </View>
+          {outsideLocations.length > 0 && (
+            <>
+              <Text style={styles.sectionLabel}>
+                {insideLocations.length > 0 ? 'Other locations:' : 'Locations:'}
+              </Text>
+              {outsideLocations.slice(0, 5).map((loc) => (
+                <View key={loc.id} style={styles.locationItem}>
+                  <View style={styles.locationInfo}>
+                    <Text style={styles.locationNameOutside}>{loc.name}</Text>
+                    <Text style={styles.locationDistance}>
+                      {formatDistance(loc.distance - loc.radius_meters)} away
+                    </Text>
+                  </View>
+                  <View style={styles.outsideBadge}>
+                    <Text style={styles.outsideBadgeText}>Outside</Text>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
+
+          {nearbyLocations.length === 0 && !loading && (
+            <Text style={styles.noLocationsText}>
+              No locations found. Add locations in the Locations tab.
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* Check In/Out Card */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Attendance Action</Text>
+        <Text style={styles.cardTitle}>Attendance</Text>
 
         <Text style={styles.currentStatus}>
-          Current Status:{' '}
+          Status:{' '}
           <Text style={styles.statusBold}>
             {lastStatus === 'check_in'
               ? 'Checked In'
@@ -301,13 +264,19 @@ export default function AttendanceScreen({ navigation }: AttendanceScreenProps) 
           </Text>
         </Text>
 
+        {selectedLocation && (
+          <Text style={styles.selectedLocationText}>
+            Location: <Text style={styles.statusBold}>{selectedLocation.name}</Text>
+          </Text>
+        )}
+
         <TouchableOpacity
           style={[
             styles.actionButton,
-            !locationState.isWithinFence && styles.actionButtonDisabled,
+            !selectedLocation && styles.actionButtonDisabled,
           ]}
           onPress={handleCheckInOut}
-          disabled={!locationState.isWithinFence || isSubmitting}
+          disabled={!selectedLocation || isSubmitting}
         >
           {isSubmitting ? (
             <ActivityIndicator color="#fff" />
@@ -316,10 +285,15 @@ export default function AttendanceScreen({ navigation }: AttendanceScreenProps) 
           )}
         </TouchableOpacity>
 
-        {!locationState.isWithinFence && !locationState.loading && (
+        {!selectedLocation && insideLocations.length === 0 && allLocations.length > 0 && (
           <Text style={styles.warningText}>
-            Move within {formatDistance(currentGeofence.radiusMeters)} of the
-            center to check in/out
+            Move inside a location to check in/out
+          </Text>
+        )}
+
+        {allLocations.length === 0 && (
+          <Text style={styles.warningText}>
+            Add locations in the Locations tab to enable check-in
           </Text>
         )}
       </View>
@@ -335,6 +309,7 @@ const styles = StyleSheet.create({
   contentContainer: {
     padding: 20,
     paddingTop: 60,
+    paddingBottom: 100,
   },
   title: {
     fontSize: 28,
@@ -364,33 +339,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 16,
   },
-  statusIndicator: {
-    alignSelf: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginBottom: 12,
-  },
-  statusText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  distanceText: {
-    textAlign: 'center',
-    fontSize: 16,
-    marginBottom: 4,
-  },
-  radiusText: {
+  coordsText: {
     textAlign: 'center',
     fontSize: 14,
     color: '#666',
-    marginBottom: 8,
-  },
-  coordsText: {
-    textAlign: 'center',
-    fontSize: 12,
-    color: '#999',
     fontFamily: 'monospace',
   },
   refreshButton: {
@@ -404,45 +356,85 @@ const styles = StyleSheet.create({
     color: '#1976d2',
     fontWeight: '600',
   },
-  infoText: {
-    textAlign: 'center',
-    fontSize: 12,
+  sectionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
     color: '#666',
-    marginBottom: 12,
-    fontFamily: 'monospace',
+    marginBottom: 8,
+    marginTop: 8,
   },
-  settingsButton: {
-    padding: 12,
-    backgroundColor: '#fff3e0',
-    borderRadius: 8,
+  locationItem: {
+    flexDirection: 'row',
     alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#f9f9f9',
     marginBottom: 8,
   },
-  settingsButtonText: {
-    color: '#e65100',
-    fontWeight: '600',
+  locationInside: {
+    backgroundColor: '#e8f5e9',
+    borderWidth: 2,
+    borderColor: '#c8e6c9',
   },
-  saveButton: {
+  locationSelected: {
+    borderColor: '#4CAF50',
+    borderWidth: 2,
+  },
+  locationInfo: {
+    flex: 1,
+  },
+  locationName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2e7d32',
+  },
+  locationNameOutside: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+  },
+  locationDistance: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  insideBadge: {
     backgroundColor: '#4CAF50',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  saveButtonText: {
+  insideBadgeText: {
     color: '#fff',
+    fontSize: 12,
     fontWeight: '600',
   },
-  historyButton: {
-    padding: 12,
-    backgroundColor: '#e8eaf6',
-    borderRadius: 8,
-    alignItems: 'center',
+  outsideBadge: {
+    backgroundColor: '#e0e0e0',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  historyButtonText: {
-    color: '#3f51b5',
+  outsideBadgeText: {
+    color: '#666',
+    fontSize: 12,
     fontWeight: '600',
+  },
+  noLocationsText: {
+    textAlign: 'center',
+    color: '#666',
+    fontStyle: 'italic',
   },
   currentStatus: {
     fontSize: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  selectedLocationText: {
+    fontSize: 14,
     marginBottom: 16,
     textAlign: 'center',
+    color: '#666',
   },
   statusBold: {
     fontWeight: 'bold',

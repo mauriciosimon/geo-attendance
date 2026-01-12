@@ -1,0 +1,535 @@
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  Modal,
+  TextInput,
+} from 'react-native';
+import * as ExpoLocation from 'expo-location';
+import { createLocation, getLocations, deleteLocationById } from '../services/locationsService';
+import { Location, Coordinates } from '../types';
+import { formatDistance } from '../utils/geofencing';
+
+const TEMP_USER_ID = 'user-123';
+
+const RADIUS_OPTIONS = [
+  { label: '100m', value: 100 },
+  { label: '200m', value: 200 },
+  { label: '500m', value: 500 },
+  { label: '1km', value: 1000 },
+];
+
+export default function LocationsScreen() {
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Modal state
+  const [modalVisible, setModalVisible] = useState(false);
+  const [name, setName] = useState('');
+  const [selectedRadius, setSelectedRadius] = useState(100);
+  const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+
+  const fetchLocations = useCallback(async () => {
+    try {
+      const { locations: data, error: err } = await getLocations();
+      if (err) {
+        setError(err.message);
+      } else {
+        setLocations(data);
+        setError(null);
+      }
+    } catch (err) {
+      setError('Failed to load locations');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLocations();
+  }, [fetchLocations]);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchLocations();
+  };
+
+  const handleDelete = (item: Location) => {
+    Alert.alert(
+      'Delete Location',
+      `Are you sure you want to delete "${item.name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!item.id) return;
+            const { error: err } = await deleteLocationById(item.id);
+            if (err) {
+              Alert.alert('Error', err.message);
+            } else {
+              setLocations((prev) => prev.filter((loc) => loc.id !== item.id));
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleUseCurrentLocation = async () => {
+    setIsGettingLocation(true);
+    try {
+      const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Error', 'Location permission denied');
+        return;
+      }
+
+      const location = await ExpoLocation.getCurrentPositionAsync({
+        accuracy: ExpoLocation.Accuracy.High,
+      });
+
+      setCoordinates({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+    } catch (err) {
+      Alert.alert('Error', 'Failed to get current location');
+    } finally {
+      setIsGettingLocation(false);
+    }
+  };
+
+  const handleSaveLocation = async () => {
+    if (!name.trim()) {
+      Alert.alert('Error', 'Please enter a location name');
+      return;
+    }
+
+    if (!coordinates) {
+      Alert.alert('Error', 'Please set coordinates using "Use Current Location"');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const { data, error: err } = await createLocation(
+        name.trim(),
+        coordinates,
+        selectedRadius,
+        TEMP_USER_ID
+      );
+
+      if (err) {
+        Alert.alert('Error', err.message);
+        return;
+      }
+
+      if (data) {
+        setLocations((prev) => [data, ...prev]);
+      }
+
+      // Reset form
+      setName('');
+      setCoordinates(null);
+      setSelectedRadius(100);
+      setModalVisible(false);
+      Alert.alert('Success', 'Location saved!');
+    } catch (err) {
+      Alert.alert('Error', 'Failed to save location');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const openAddModal = () => {
+    setName('');
+    setCoordinates(null);
+    setSelectedRadius(100);
+    setModalVisible(true);
+  };
+
+  const renderItem = ({ item }: { item: Location }) => (
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.locationName}>{item.name}</Text>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => handleDelete(item)}
+        >
+          <Text style={styles.deleteButtonText}>Delete</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.infoRow}>
+        <Text style={styles.infoLabel}>Radius:</Text>
+        <Text style={styles.infoValue}>{formatDistance(item.radius_meters)}</Text>
+      </View>
+
+      <View style={styles.infoRow}>
+        <Text style={styles.infoLabel}>Coordinates:</Text>
+        <Text style={styles.coordsValue}>
+          {item.latitude.toFixed(6)}, {item.longitude.toFixed(6)}
+        </Text>
+      </View>
+    </View>
+  );
+
+  const renderEmptyList = () => (
+    <View style={styles.emptyContainer}>
+      <Text style={styles.emptyText}>No locations yet</Text>
+      <Text style={styles.emptySubtext}>
+        Tap "Add Location" to create your first geofence
+      </Text>
+    </View>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Locations</Text>
+        <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
+          <Text style={styles.addButtonText}>+ Add Location</Text>
+        </TouchableOpacity>
+      </View>
+
+      {error && <Text style={styles.errorText}>{error}</Text>}
+
+      <FlatList
+        data={locations}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id || Math.random().toString()}
+        contentContainerStyle={styles.listContainer}
+        ListEmptyComponent={renderEmptyList}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+        }
+      />
+
+      {/* Add Location Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add New Location</Text>
+
+            <Text style={styles.inputLabel}>Location Name</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="e.g., Sharjah Office"
+              value={name}
+              onChangeText={setName}
+            />
+
+            <Text style={styles.inputLabel}>Radius</Text>
+            <View style={styles.radiusContainer}>
+              {RADIUS_OPTIONS.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.radiusOption,
+                    selectedRadius === option.value && styles.radiusOptionSelected,
+                  ]}
+                  onPress={() => setSelectedRadius(option.value)}
+                >
+                  <Text
+                    style={[
+                      styles.radiusOptionText,
+                      selectedRadius === option.value && styles.radiusOptionTextSelected,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.inputLabel}>Coordinates</Text>
+            <TouchableOpacity
+              style={styles.locationButton}
+              onPress={handleUseCurrentLocation}
+              disabled={isGettingLocation}
+            >
+              {isGettingLocation ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.locationButtonText}>Use Current Location</Text>
+              )}
+            </TouchableOpacity>
+
+            {coordinates && (
+              <Text style={styles.coordsDisplay}>
+                {coordinates.latitude.toFixed(6)}, {coordinates.longitude.toFixed(6)}
+              </Text>
+            )}
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setModalVisible(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.saveButton, (!name || !coordinates) && styles.saveButtonDisabled]}
+                onPress={handleSaveLocation}
+                disabled={!name || !coordinates || isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingBottom: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+  },
+  addButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  addButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  listContainer: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  locationName: {
+    fontSize: 18,
+    fontWeight: '600',
+    flex: 1,
+  },
+  deleteButton: {
+    backgroundColor: '#ffebee',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  deleteButtonText: {
+    color: '#f44336',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  infoLabel: {
+    fontSize: 14,
+    color: '#666',
+    width: 100,
+  },
+  infoValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  coordsValue: {
+    fontSize: 14,
+    fontFamily: 'monospace',
+    color: '#333',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    fontSize: 18,
+    color: '#666',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#f44336',
+    textAlign: 'center',
+    padding: 16,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 16,
+  },
+  radiusContainer: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  radiusOption: {
+    flex: 1,
+    paddingVertical: 10,
+    marginHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+  },
+  radiusOptionSelected: {
+    backgroundColor: '#007AFF',
+  },
+  radiusOptionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  radiusOptionTextSelected: {
+    color: '#fff',
+  },
+  locationButton: {
+    backgroundColor: '#4CAF50',
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  locationButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  coordsDisplay: {
+    textAlign: 'center',
+    fontFamily: 'monospace',
+    color: '#666',
+    marginBottom: 16,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    marginTop: 16,
+  },
+  cancelButton: {
+    flex: 1,
+    padding: 14,
+    marginRight: 8,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#666',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  saveButton: {
+    flex: 1,
+    padding: 14,
+    marginLeft: 8,
+    borderRadius: 8,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+});

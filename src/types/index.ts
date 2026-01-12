@@ -37,3 +37,18 @@ export interface SavedLocation {
   label?: string;
   created_at?: string;
 }
+
+export interface Location {
+  id?: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radius_meters: number;
+  created_by: string;
+  created_at?: string;
+}
+
+export interface NearbyLocation extends Location {
+  distance: number;
+  isInside: boolean;
+}

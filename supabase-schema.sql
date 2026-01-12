@@ -73,3 +73,44 @@ USING (auth.uid()::text = user_id);
 
 -- For development/testing without auth:
 -- CREATE POLICY "Allow all" ON saved_locations FOR ALL USING (true) WITH CHECK (true);
+
+-- ============================================
+-- Locations table (geofence locations)
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS locations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  latitude DOUBLE PRECISION NOT NULL,
+  longitude DOUBLE PRECISION NOT NULL,
+  radius_meters INTEGER NOT NULL DEFAULT 100,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index for faster queries
+CREATE INDEX IF NOT EXISTS idx_locations_created_by
+ON locations(created_by, created_at DESC);
+
+-- Enable RLS
+ALTER TABLE locations ENABLE ROW LEVEL SECURITY;
+
+-- Policies (allow all users to view locations, only creator can modify)
+CREATE POLICY "Anyone can view locations"
+ON locations FOR SELECT
+USING (true);
+
+CREATE POLICY "Users can insert locations"
+ON locations FOR INSERT
+WITH CHECK (true);
+
+CREATE POLICY "Users can update own locations"
+ON locations FOR UPDATE
+USING (created_by = auth.uid()::text);
+
+CREATE POLICY "Users can delete own locations"
+ON locations FOR DELETE
+USING (created_by = auth.uid()::text);
+
+-- For development/testing without auth:
+-- CREATE POLICY "Allow all locations" ON locations FOR ALL USING (true) WITH CHECK (true);
