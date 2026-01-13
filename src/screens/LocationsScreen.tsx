@@ -13,10 +13,9 @@ import {
 } from 'react-native';
 import * as ExpoLocation from 'expo-location';
 import { createLocation, getLocations, deleteLocationById, updateLocation } from '../services/locationsService';
+import { useAuth } from '../context/AuthContext';
 import { Location, Coordinates } from '../types';
 import { formatDistance } from '../utils/geofencing';
-
-const TEMP_USER_ID = 'user-123';
 
 const RADIUS_OPTIONS = [
   { label: '100m', value: 100 },
@@ -26,6 +25,9 @@ const RADIUS_OPTIONS = [
 ];
 
 export default function LocationsScreen() {
+  const { user } = useAuth();
+  const userId = user?.id || '';
+
   const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -172,7 +174,7 @@ export default function LocationsScreen() {
           name.trim(),
           coordinates,
           radius,
-          TEMP_USER_ID
+          userId
         );
 
         if (err) {
@@ -439,7 +441,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 60,
+    paddingTop: 80,
     paddingBottom: 16,
     backgroundColor: '#fff',
     borderBottomWidth: 1,

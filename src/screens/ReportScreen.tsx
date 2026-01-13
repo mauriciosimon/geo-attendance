@@ -13,10 +13,9 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getAttendanceByDateRange } from '../services/attendanceService';
 import { getLocations } from '../services/locationsService';
+import { useAuth } from '../context/AuthContext';
 import { AttendanceRecord, Location } from '../types';
 import { calculateDistance } from '../utils/geofencing';
-
-const TEMP_USER_ID = 'user-123';
 
 interface LocationTimeSummary {
   locationId: string;
@@ -59,6 +58,9 @@ function findNearestLocation(
 }
 
 export default function ReportScreen() {
+  const { user } = useAuth();
+  const userId = user?.id || '';
+
   const [startDate, setStartDate] = useState<Date>(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7); // Default to last 7 days
@@ -83,7 +85,7 @@ export default function ReportScreen() {
     setLoading(true);
     try {
       const { records, error } = await getAttendanceByDateRange(
-        TEMP_USER_ID,
+        userId,
         startDate,
         endDate
       );
@@ -389,7 +391,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingTop: 60,
+    paddingTop: 80,
     paddingBottom: 16,
     backgroundColor: '#fff',
     borderBottomWidth: 1,

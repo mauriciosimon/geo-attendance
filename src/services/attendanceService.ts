@@ -6,15 +6,20 @@ const TABLE_NAME = 'attendance';
 export async function recordAttendance(
   userId: string,
   status: AttendanceStatus,
-  coordinates: Coordinates
+  coordinates: Coordinates,
+  locationId?: string
 ): Promise<{ data: AttendanceRecord | null; error: Error | null }> {
-  const record: Omit<AttendanceRecord, 'id' | 'created_at'> = {
+  const record: Omit<AttendanceRecord, 'id' | 'created_at'> & { location_id?: string } = {
     user_id: userId,
     timestamp: new Date().toISOString(),
     status,
     latitude: coordinates.latitude,
     longitude: coordinates.longitude,
   };
+
+  if (locationId) {
+    record.location_id = locationId;
+  }
 
   const { data, error } = await supabase
     .from(TABLE_NAME)

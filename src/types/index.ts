@@ -52,3 +52,13 @@ export interface NearbyLocation extends Location {
   distance: number;
   isInside: boolean;
 }
+
+export type UserRole = 'employee' | 'admin';
+
+export interface Profile {
+  id: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  created_at?: string;
+}

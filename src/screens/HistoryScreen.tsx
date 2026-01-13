@@ -10,11 +10,13 @@ import {
   RefreshControl,
 } from 'react-native';
 import { getSavedLocations, deleteLocation } from '../services/locationService';
+import { useAuth } from '../context/AuthContext';
 import { SavedLocation } from '../types';
 
-const TEMP_USER_ID = 'user-123';
-
 export default function HistoryScreen() {
+  const { user } = useAuth();
+  const userId = user?.id || '';
+
   const [locations, setLocations] = useState<SavedLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -22,7 +24,7 @@ export default function HistoryScreen() {
 
   const fetchLocations = useCallback(async () => {
     try {
-      const { locations: data, error: err } = await getSavedLocations(TEMP_USER_ID);
+      const { locations: data, error: err } = await getSavedLocations(userId);
       if (err) {
         setError(err.message);
       } else {
@@ -152,7 +154,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-    paddingTop: 60,
+    paddingTop: 80,
   },
   centerContainer: {
     flex: 1,

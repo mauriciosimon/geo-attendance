@@ -13,15 +13,17 @@ import { useFocusEffect } from '@react-navigation/native';
 import { calculateDistance, formatDistance } from '../utils/geofencing';
 import { recordAttendance, getLastAttendanceStatus, getTodayAttendance } from '../services/attendanceService';
 import { getLocations } from '../services/locationsService';
+import { useAuth } from '../context/AuthContext';
 import { Coordinates, AttendanceStatus, Location as LocationType, NearbyLocation, AttendanceRecord } from '../types';
-
-const TEMP_USER_ID = 'user-123';
 
 interface AttendanceHistoryItem extends AttendanceRecord {
   locationName?: string;
 }
 
 export default function AttendanceScreen() {
+  const { user } = useAuth();
+  const userId = user?.id || '';
+
   const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +54,7 @@ export default function AttendanceScreen() {
   };
 
   const fetchAttendanceHistory = useCallback(async (locations: LocationType[]) => {
-    const { records } = await getTodayAttendance(TEMP_USER_ID);
+    const { records } = await getTodayAttendance(userId);
     const historyWithLocations: AttendanceHistoryItem[] = records.map((record) => ({
       ...record,
       locationName: findLocationName(record.latitude, record.longitude, locations),
@@ -127,7 +129,7 @@ export default function AttendanceScreen() {
   }, [calculateNearbyLocations]);
 
   const fetchLastStatus = useCallback(async () => {
-    const { status } = await getLastAttendanceStatus(TEMP_USER_ID);
+    const { status } = await getLastAttendanceStatus(userId);
     setLastStatus(status);
   }, []);
 
@@ -159,9 +161,10 @@ export default function AttendanceScreen() {
 
     try {
       const { error: err } = await recordAttendance(
-        TEMP_USER_ID,
+        userId,
         newStatus,
-        coordinates
+        coordinates,
+        selectedLocation.id
       );
 
       if (err) {
@@ -389,7 +392,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 20,
-    paddingTop: 60,
+    paddingTop: 80,
     paddingBottom: 100,
   },
   title: {
