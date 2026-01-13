@@ -11,11 +11,15 @@ import {
 import * as Location from 'expo-location';
 import { useFocusEffect } from '@react-navigation/native';
 import { calculateDistance, formatDistance } from '../utils/geofencing';
-import { recordAttendance, getLastAttendanceStatus } from '../services/attendanceService';
+import { recordAttendance, getLastAttendanceStatus, getTodayAttendance } from '../services/attendanceService';
 import { getLocations } from '../services/locationsService';
-import { Coordinates, AttendanceStatus, Location as LocationType, NearbyLocation } from '../types';
+import { Coordinates, AttendanceStatus, Location as LocationType, NearbyLocation, AttendanceRecord } from '../types';
 
 const TEMP_USER_ID = 'user-123';
+
+interface AttendanceHistoryItem extends AttendanceRecord {
+  locationName?: string;
+}
 
 export default function AttendanceScreen() {
   const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
@@ -26,17 +30,45 @@ export default function AttendanceScreen() {
   const [allLocations, setAllLocations] = useState<LocationType[]>([]);
   const [nearbyLocations, setNearbyLocations] = useState<NearbyLocation[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<NearbyLocation | null>(null);
+  const [attendanceHistory, setAttendanceHistory] = useState<AttendanceHistoryItem[]>([]);
 
   const fetchLocations = useCallback(async () => {
     const { locations } = await getLocations();
     setAllLocations(locations);
+    return locations;
   }, []);
 
-  // Refresh locations when screen comes into focus
+  const findLocationName = (lat: number, lng: number, locations: LocationType[]): string => {
+    for (const loc of locations) {
+      const distance = calculateDistance(
+        { latitude: lat, longitude: lng },
+        { latitude: loc.latitude, longitude: loc.longitude }
+      );
+      if (distance <= loc.radius_meters) {
+        return loc.name;
+      }
+    }
+    return 'Unknown';
+  };
+
+  const fetchAttendanceHistory = useCallback(async (locations: LocationType[]) => {
+    const { records } = await getTodayAttendance(TEMP_USER_ID);
+    const historyWithLocations: AttendanceHistoryItem[] = records.map((record) => ({
+      ...record,
+      locationName: findLocationName(record.latitude, record.longitude, locations),
+    }));
+    setAttendanceHistory(historyWithLocations.reverse()); // Most recent first
+  }, []);
+
+  // Refresh locations and history when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      fetchLocations();
-    }, [fetchLocations])
+      const loadData = async () => {
+        const locations = await fetchLocations();
+        fetchAttendanceHistory(locations);
+      };
+      loadData();
+    }, [fetchLocations, fetchAttendanceHistory])
   );
 
   const calculateNearbyLocations = useCallback(
@@ -100,9 +132,13 @@ export default function AttendanceScreen() {
   }, []);
 
   useEffect(() => {
-    fetchLocations();
-    fetchLastStatus();
-  }, [fetchLocations, fetchLastStatus]);
+    const loadInitialData = async () => {
+      const locations = await fetchLocations();
+      fetchLastStatus();
+      fetchAttendanceHistory(locations);
+    };
+    loadInitialData();
+  }, [fetchLocations, fetchLastStatus, fetchAttendanceHistory]);
 
   useEffect(() => {
     if (allLocations.length >= 0) {
@@ -134,6 +170,7 @@ export default function AttendanceScreen() {
       }
 
       setLastStatus(newStatus);
+      fetchAttendanceHistory(allLocations); // Refresh history
       Alert.alert(
         'Success',
         `${newStatus === 'check_in' ? 'Checked in' : 'Checked out'} at ${selectedLocation.name}!`
@@ -295,6 +332,50 @@ export default function AttendanceScreen() {
           <Text style={styles.warningText}>
             Add locations in the Locations tab to enable check-in
           </Text>
+        )}
+      </View>
+
+      {/* Today's History Card */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Today's History</Text>
+
+        {attendanceHistory.length === 0 ? (
+          <Text style={styles.noHistoryText}>No check-ins/outs today</Text>
+        ) : (
+          <View style={styles.historyTable}>
+            <View style={styles.historyHeader}>
+              <Text style={[styles.historyHeaderCell, styles.historyStatus]}>Status</Text>
+              <Text style={[styles.historyHeaderCell, styles.historyLocation]}>Location</Text>
+              <Text style={[styles.historyHeaderCell, styles.historyTime]}>Time</Text>
+            </View>
+            {attendanceHistory.map((item, index) => (
+              <View
+                key={item.id || index}
+                style={[
+                  styles.historyRow,
+                  index % 2 === 0 ? styles.historyRowEven : styles.historyRowOdd,
+                ]}
+              >
+                <View style={[styles.historyCell, styles.historyStatus]}>
+                  <View
+                    style={[
+                      styles.statusDot,
+                      item.status === 'check_in' ? styles.statusDotIn : styles.statusDotOut,
+                    ]}
+                  />
+                  <Text style={styles.historyCellText}>
+                    {item.status === 'check_in' ? 'In' : 'Out'}
+                  </Text>
+                </View>
+                <Text style={[styles.historyCell, styles.historyLocation, styles.historyCellText]} numberOfLines={1}>
+                  {item.locationName}
+                </Text>
+                <Text style={[styles.historyCell, styles.historyTime, styles.historyCellText]}>
+                  {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+              </View>
+            ))}
+          </View>
         )}
       </View>
     </ScrollView>
@@ -463,5 +544,72 @@ const styles = StyleSheet.create({
     color: '#f44336',
     textAlign: 'center',
     marginBottom: 12,
+  },
+  noHistoryText: {
+    textAlign: 'center',
+    color: '#666',
+    fontStyle: 'italic',
+  },
+  historyTable: {
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  historyHeaderCell: {
+    fontWeight: '600',
+    fontSize: 13,
+    color: '#333',
+  },
+  historyRow: {
+    flexDirection: 'row',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  historyRowEven: {
+    backgroundColor: '#fff',
+  },
+  historyRowOdd: {
+    backgroundColor: '#fafafa',
+  },
+  historyCell: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  historyCellText: {
+    fontSize: 13,
+    color: '#333',
+  },
+  historyStatus: {
+    width: 60,
+  },
+  historyLocation: {
+    flex: 1,
+    paddingHorizontal: 8,
+  },
+  historyTime: {
+    width: 60,
+    textAlign: 'right',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  statusDotIn: {
+    backgroundColor: '#4CAF50',
+  },
+  statusDotOut: {
+    backgroundColor: '#f44336',
   },
 });

@@ -34,7 +34,9 @@ export default function LocationsScreen() {
   // Modal state
   const [modalVisible, setModalVisible] = useState(false);
   const [name, setName] = useState('');
-  const [selectedRadius, setSelectedRadius] = useState(100);
+  const [selectedRadius, setSelectedRadius] = useState<number | null>(100);
+  const [customRadiusKm, setCustomRadiusKm] = useState('');
+  const [useCustomRadius, setUseCustomRadius] = useState(false);
   const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
@@ -112,6 +114,15 @@ export default function LocationsScreen() {
     }
   };
 
+  const getEffectiveRadius = (): number | null => {
+    if (useCustomRadius) {
+      const km = parseFloat(customRadiusKm);
+      if (isNaN(km) || km <= 0) return null;
+      return Math.round(km * 1000); // Convert km to meters
+    }
+    return selectedRadius;
+  };
+
   const handleSaveLocation = async () => {
     if (!name.trim()) {
       Alert.alert('Error', 'Please enter a location name');
@@ -123,12 +134,18 @@ export default function LocationsScreen() {
       return;
     }
 
+    const radius = getEffectiveRadius();
+    if (!radius) {
+      Alert.alert('Error', 'Please enter a valid radius');
+      return;
+    }
+
     setIsSaving(true);
     try {
       const { data, error: err } = await createLocation(
         name.trim(),
         coordinates,
-        selectedRadius,
+        radius,
         TEMP_USER_ID
       );
 
@@ -145,6 +162,8 @@ export default function LocationsScreen() {
       setName('');
       setCoordinates(null);
       setSelectedRadius(100);
+      setCustomRadiusKm('');
+      setUseCustomRadius(false);
       setModalVisible(false);
       Alert.alert('Success', 'Location saved!');
     } catch (err) {
@@ -158,6 +177,8 @@ export default function LocationsScreen() {
     setName('');
     setCoordinates(null);
     setSelectedRadius(100);
+    setCustomRadiusKm('');
+    setUseCustomRadius(false);
     setModalVisible(true);
   };
 
@@ -252,14 +273,18 @@ export default function LocationsScreen() {
                   key={option.value}
                   style={[
                     styles.radiusOption,
-                    selectedRadius === option.value && styles.radiusOptionSelected,
+                    !useCustomRadius && selectedRadius === option.value && styles.radiusOptionSelected,
                   ]}
-                  onPress={() => setSelectedRadius(option.value)}
+                  onPress={() => {
+                    setSelectedRadius(option.value);
+                    setUseCustomRadius(false);
+                    setCustomRadiusKm('');
+                  }}
                 >
                   <Text
                     style={[
                       styles.radiusOptionText,
-                      selectedRadius === option.value && styles.radiusOptionTextSelected,
+                      !useCustomRadius && selectedRadius === option.value && styles.radiusOptionTextSelected,
                     ]}
                   >
                     {option.label}
@@ -267,6 +292,29 @@ export default function LocationsScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            <Text style={styles.inputLabel}>Or enter custom radius (km)</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="e.g., 2.5"
+              value={customRadiusKm}
+              onChangeText={(text) => {
+                setCustomRadiusKm(text);
+                if (text) {
+                  setUseCustomRadius(true);
+                  setSelectedRadius(null);
+                } else {
+                  setUseCustomRadius(false);
+                  setSelectedRadius(100);
+                }
+              }}
+              keyboardType="decimal-pad"
+            />
+            {useCustomRadius && customRadiusKm && (
+              <Text style={styles.customRadiusDisplay}>
+                = {(parseFloat(customRadiusKm) * 1000).toFixed(0)}m
+              </Text>
+            )}
 
             <Text style={styles.inputLabel}>Coordinates</Text>
             <TouchableOpacity
@@ -296,9 +344,9 @@ export default function LocationsScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.saveButton, (!name || !coordinates) && styles.saveButtonDisabled]}
+                style={[styles.saveButton, (!name || !coordinates || !getEffectiveRadius()) && styles.saveButtonDisabled]}
                 onPress={handleSaveLocation}
-                disabled={!name || !coordinates || isSaving}
+                disabled={!name || !coordinates || !getEffectiveRadius() || isSaving}
               >
                 {isSaving ? (
                   <ActivityIndicator color="#fff" />
@@ -498,6 +546,13 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     color: '#666',
     marginBottom: 16,
+  },
+  customRadiusDisplay: {
+    textAlign: 'center',
+    color: '#007AFF',
+    fontSize: 14,
+    marginTop: -8,
+    marginBottom: 8,
   },
   modalButtons: {
     flexDirection: 'row',
