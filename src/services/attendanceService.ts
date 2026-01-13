@@ -70,3 +70,29 @@ export async function getTodayAttendance(
 
   return { records: data || [], error: null };
 }
+
+export async function getAttendanceByDateRange(
+  userId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<{ records: AttendanceRecord[]; error: Error | null }> {
+  const start = new Date(startDate);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(endDate);
+  end.setHours(23, 59, 59, 999);
+
+  const { data, error } = await supabase
+    .from(TABLE_NAME)
+    .select('*')
+    .eq('user_id', userId)
+    .gte('timestamp', start.toISOString())
+    .lte('timestamp', end.toISOString())
+    .order('timestamp', { ascending: true });
+
+  if (error) {
+    return { records: [], error: new Error(error.message) };
+  }
+
+  return { records: data || [], error: null };
+}

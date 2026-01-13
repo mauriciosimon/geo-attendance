@@ -87,6 +87,45 @@ export async function getLocations(): Promise<{ locations: Location[]; error: Er
   return { locations: data || [], error: null };
 }
 
+export async function updateLocation(
+  locationId: string,
+  updates: {
+    name?: string;
+    latitude?: number;
+    longitude?: number;
+    radius_meters?: number;
+  }
+): Promise<{ data: Location | null; error: Error | null }> {
+  if (!isSupabaseConfigured) {
+    try {
+      const locations = await getLocalLocations();
+      const index = locations.findIndex((loc) => loc.id === locationId);
+      if (index === -1) {
+        return { data: null, error: new Error('Location not found') };
+      }
+      const updated = { ...locations[index], ...updates };
+      locations[index] = updated;
+      await saveLocalLocations(locations);
+      return { data: updated, error: null };
+    } catch (err) {
+      return { data: null, error: new Error('Failed to update locally') };
+    }
+  }
+
+  const { data, error } = await supabase
+    .from(TABLE_NAME)
+    .update(updates)
+    .eq('id', locationId)
+    .select()
+    .single();
+
+  if (error) {
+    return { data: null, error: new Error(error.message) };
+  }
+
+  return { data, error: null };
+}
+
 export async function deleteLocationById(
   locationId: string
 ): Promise<{ error: Error | null }> {

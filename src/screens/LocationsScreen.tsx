@@ -12,7 +12,7 @@ import {
   TextInput,
 } from 'react-native';
 import * as ExpoLocation from 'expo-location';
-import { createLocation, getLocations, deleteLocationById } from '../services/locationsService';
+import { createLocation, getLocations, deleteLocationById, updateLocation } from '../services/locationsService';
 import { Location, Coordinates } from '../types';
 import { formatDistance } from '../utils/geofencing';
 
@@ -40,6 +40,9 @@ export default function LocationsScreen() {
   const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
+
+  // Edit mode state
+  const [editingLocation, setEditingLocation] = useState<Location | null>(null);
 
   const fetchLocations = useCallback(async () => {
     try {
@@ -142,20 +145,46 @@ export default function LocationsScreen() {
 
     setIsSaving(true);
     try {
-      const { data, error: err } = await createLocation(
-        name.trim(),
-        coordinates,
-        radius,
-        TEMP_USER_ID
-      );
+      if (editingLocation) {
+        // Update existing location
+        const { data, error: err } = await updateLocation(editingLocation.id!, {
+          name: name.trim(),
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude,
+          radius_meters: radius,
+        });
 
-      if (err) {
-        Alert.alert('Error', err.message);
-        return;
-      }
+        if (err) {
+          Alert.alert('Error', err.message);
+          return;
+        }
 
-      if (data) {
-        setLocations((prev) => [data, ...prev]);
+        if (data) {
+          setLocations((prev) =>
+            prev.map((loc) => (loc.id === editingLocation.id ? data : loc))
+          );
+        }
+
+        Alert.alert('Success', 'Location updated!');
+      } else {
+        // Create new location
+        const { data, error: err } = await createLocation(
+          name.trim(),
+          coordinates,
+          radius,
+          TEMP_USER_ID
+        );
+
+        if (err) {
+          Alert.alert('Error', err.message);
+          return;
+        }
+
+        if (data) {
+          setLocations((prev) => [data, ...prev]);
+        }
+
+        Alert.alert('Success', 'Location saved!');
       }
 
       // Reset form
@@ -164,8 +193,8 @@ export default function LocationsScreen() {
       setSelectedRadius(100);
       setCustomRadiusKm('');
       setUseCustomRadius(false);
+      setEditingLocation(null);
       setModalVisible(false);
-      Alert.alert('Success', 'Location saved!');
     } catch (err) {
       Alert.alert('Error', 'Failed to save location');
     } finally {
@@ -179,6 +208,28 @@ export default function LocationsScreen() {
     setSelectedRadius(100);
     setCustomRadiusKm('');
     setUseCustomRadius(false);
+    setEditingLocation(null);
+    setModalVisible(true);
+  };
+
+  const openEditModal = (location: Location) => {
+    setEditingLocation(location);
+    setName(location.name);
+    setCoordinates({
+      latitude: location.latitude,
+      longitude: location.longitude,
+    });
+    // Set radius - check if it matches a preset or use custom
+    const preset = RADIUS_OPTIONS.find((opt) => opt.value === location.radius_meters);
+    if (preset) {
+      setSelectedRadius(preset.value);
+      setUseCustomRadius(false);
+      setCustomRadiusKm('');
+    } else {
+      setSelectedRadius(null);
+      setUseCustomRadius(true);
+      setCustomRadiusKm((location.radius_meters / 1000).toString());
+    }
     setModalVisible(true);
   };
 
@@ -186,12 +237,20 @@ export default function LocationsScreen() {
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <Text style={styles.locationName}>{item.name}</Text>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => handleDelete(item)}
-        >
-          <Text style={styles.deleteButtonText}>Delete</Text>
-        </TouchableOpacity>
+        <View style={styles.cardActions}>
+          <TouchableOpacity
+            style={styles.editButton}
+            onPress={() => openEditModal(item)}
+          >
+            <Text style={styles.editButtonText}>Edit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => handleDelete(item)}
+          >
+            <Text style={styles.deleteButtonText}>Delete</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.infoRow}>
@@ -247,7 +306,7 @@ export default function LocationsScreen() {
         }
       />
 
-      {/* Add Location Modal */}
+      {/* Add/Edit Location Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -256,7 +315,9 @@ export default function LocationsScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add New Location</Text>
+            <Text style={styles.modalTitle}>
+              {editingLocation ? 'Edit Location' : 'Add New Location'}
+            </Text>
 
             <Text style={styles.inputLabel}>Location Name</Text>
             <TextInput
@@ -423,6 +484,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     flex: 1,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  editButton: {
+    backgroundColor: '#e3f2fd',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  editButtonText: {
+    color: '#1976d2',
+    fontWeight: '600',
+    fontSize: 12,
   },
   deleteButton: {
     backgroundColor: '#ffebee',

@@ -5,11 +5,13 @@ import { Text } from 'react-native';
 import AttendanceScreen from './src/screens/AttendanceScreen';
 import LocationsScreen from './src/screens/LocationsScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
+import ReportScreen from './src/screens/ReportScreen';
 
 export type RootTabParamList = {
   CheckIn: undefined;
   Locations: undefined;
   History: undefined;
+  Report: undefined;
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -19,6 +21,7 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
     CheckIn: focused ? '✓' : '○',
     Locations: focused ? '◉' : '◎',
     History: focused ? '▣' : '▢',
+    Report: focused ? '▤' : '▧',
   };
   return (
     <Text style={{ fontSize: 20, color: focused ? '#007AFF' : '#999' }}>
@@ -62,6 +65,11 @@ export default function App() {
           name="History"
           component={HistoryScreen}
           options={{ tabBarLabel: 'History' }}
+        />
+        <Tab.Screen
+          name="Report"
+          component={ReportScreen}
+          options={{ tabBarLabel: 'Report' }}
         />
       </Tab.Navigator>
     </NavigationContainer>
