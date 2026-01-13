@@ -54,13 +54,15 @@ export default function AttendanceScreen() {
   };
 
   const fetchAttendanceHistory = useCallback(async (locations: LocationType[]) => {
-    const { records } = await getTodayAttendance(userId);
+    console.log('Fetching attendance history for userId:', userId);
+    const { records, error } = await getTodayAttendance(userId);
+    console.log('Attendance history result:', { records, error });
     const historyWithLocations: AttendanceHistoryItem[] = records.map((record) => ({
       ...record,
       locationName: findLocationName(record.latitude, record.longitude, locations),
     }));
     setAttendanceHistory(historyWithLocations.reverse()); // Most recent first
-  }, []);
+  }, [userId]);
 
   // Refresh locations and history when screen comes into focus
   useFocusEffect(
@@ -112,6 +114,8 @@ export default function AttendanceScreen() {
 
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
+        maximumAge: 0, // Force fresh location, no cache
+        timeout: 15000, // 15 second timeout
       });
 
       const coords: Coordinates = {
@@ -129,9 +133,11 @@ export default function AttendanceScreen() {
   }, [calculateNearbyLocations]);
 
   const fetchLastStatus = useCallback(async () => {
-    const { status } = await getLastAttendanceStatus(userId);
+    console.log('Fetching last status for userId:', userId);
+    const { status, error } = await getLastAttendanceStatus(userId);
+    console.log('Last status result:', { status, error });
     setLastStatus(status);
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -160,12 +166,16 @@ export default function AttendanceScreen() {
     setIsSubmitting(true);
 
     try {
-      const { error: err } = await recordAttendance(
+      console.log('Recording attendance:', { userId, newStatus, coordinates, locationId: selectedLocation.id });
+
+      const { data, error: err } = await recordAttendance(
         userId,
         newStatus,
         coordinates,
         selectedLocation.id
       );
+
+      console.log('Record result:', { data, error: err });
 
       if (err) {
         Alert.alert('Error', err.message);
@@ -173,7 +183,7 @@ export default function AttendanceScreen() {
       }
 
       setLastStatus(newStatus);
-      fetchAttendanceHistory(allLocations); // Refresh history
+      await fetchAttendanceHistory(allLocations); // Refresh history
       Alert.alert(
         'Success',
         `${newStatus === 'check_in' ? 'Checked in' : 'Checked out'} at ${selectedLocation.name}!`

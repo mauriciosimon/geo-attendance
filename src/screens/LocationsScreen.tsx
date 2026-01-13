@@ -25,7 +25,7 @@ const RADIUS_OPTIONS = [
 ];
 
 export default function LocationsScreen() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const userId = user?.id || '';
 
   const [locations, setLocations] = useState<Location[]>([]);
@@ -106,6 +106,8 @@ export default function LocationsScreen() {
 
       const location = await ExpoLocation.getCurrentPositionAsync({
         accuracy: ExpoLocation.Accuracy.High,
+        maximumAge: 0, // Force fresh location, no cache
+        timeout: 15000, // 15 second timeout
       });
 
       setCoordinates({
@@ -239,20 +241,22 @@ export default function LocationsScreen() {
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <Text style={styles.locationName}>{item.name}</Text>
-        <View style={styles.cardActions}>
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={() => openEditModal(item)}
-          >
-            <Text style={styles.editButtonText}>Edit</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => handleDelete(item)}
-          >
-            <Text style={styles.deleteButtonText}>Delete</Text>
-          </TouchableOpacity>
-        </View>
+        {isAdmin && (
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => openEditModal(item)}
+            >
+              <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => handleDelete(item)}
+            >
+              <Text style={styles.deleteButtonText}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       <View style={styles.infoRow}>
@@ -290,9 +294,11 @@ export default function LocationsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Locations</Text>
-        <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
-          <Text style={styles.addButtonText}>+ Add Location</Text>
-        </TouchableOpacity>
+        {isAdmin && (
+          <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
+            <Text style={styles.addButtonText}>+ Add Location</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {error && <Text style={styles.errorText}>{error}</Text>}

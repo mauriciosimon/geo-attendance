@@ -23,19 +23,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
+  const fetchProfile = async (userId: string): Promise<Profile | null> => {
+    console.log('fetchProfile: Querying for userId', userId);
+    try {
+      // Use fetch directly to avoid Supabase client issues
+      const response = await fetch(
+        `https://ifkutaryzkimyjyuiwfx.supabase.co/rest/v1/profiles?id=eq.${userId}&select=*`,
+        {
+          headers: {
+            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlma3V0YXJ5emtpbXlqeXVpd2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMzE0MzAsImV4cCI6MjA4MzgwNzQzMH0.Xc4IHynmO0b7yJwx9ZzZjTNMWz99Jlp9p1OkAlH1veE',
+            'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlma3V0YXJ5emtpbXlqeXVpd2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMzE0MzAsImV4cCI6MjA4MzgwNzQzMH0.Xc4IHynmO0b7yJwx9ZzZjTNMWz99Jlp9p1OkAlH1veE`,
+          },
+        }
+      );
 
-    if (error) {
-      console.error('Error fetching profile:', error);
+      const data = await response.json();
+      console.log('fetchProfile: Result', data);
+
+      if (data && data.length > 0) {
+        return data[0] as Profile;
+      }
+      return null;
+    } catch (err) {
+      console.error('fetchProfile: Exception', err);
       return null;
     }
-
-    return data as Profile;
   };
 
   const refreshProfile = async () => {
@@ -47,12 +59,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    console.log('AuthContext: Getting session...');
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      console.log('AuthContext: Session result', { session: !!session, error });
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id).then(setProfile);
+        console.log('AuthContext: Fetching profile for', session.user.id);
+        fetchProfile(session.user.id).then((profile) => {
+          console.log('AuthContext: Profile fetched', profile);
+          setProfile(profile);
+          setLoading(false);
+        });
+      } else {
+        setLoading(false);
       }
+    }).catch((err) => {
+      console.error('AuthContext: Error getting session', err);
       setLoading(false);
     });
 
