@@ -1,7 +1,28 @@
-import { supabase } from '../config/supabase';
 import { AttendanceRecord, AttendanceStatus, Coordinates } from '../types';
+import { supabase } from '../config/supabase';
 
-const TABLE_NAME = 'attendance';
+const SUPABASE_URL = 'https://ifkutaryzkimyjyuiwfx.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlma3V0YXJ5emtpbXlqeXVpd2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMzE0MzAsImV4cCI6MjA4MzgwNzQzMH0.Xc4IHynmO0b7yJwx9ZzZjTNMWz99Jlp9p1OkAlH1veE';
+
+async function getAccessToken(): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token || SUPABASE_ANON_KEY;
+}
+
+async function fetchFromSupabase(endpoint: string, options?: RequestInit) {
+  const token = await getAccessToken();
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
+    headers: {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+      ...options?.headers,
+    },
+    ...options,
+  });
+  return response;
+}
 
 export async function recordAttendance(
   userId: string,
@@ -21,39 +42,46 @@ export async function recordAttendance(
     record.location_id = locationId;
   }
 
-  const { data, error } = await supabase
-    .from(TABLE_NAME)
-    .insert(record)
-    .select()
-    .single();
+  try {
+    const response = await fetchFromSupabase('attendance', {
+      method: 'POST',
+      body: JSON.stringify(record),
+    });
 
-  if (error) {
-    return { data: null, error: new Error(error.message) };
+    const data = await response.json();
+
+    if (!response.ok) {
+      return { data: null, error: new Error(data.message || 'Failed to record attendance') };
+    }
+
+    return { data: Array.isArray(data) ? data[0] : data, error: null };
+  } catch (err) {
+    return { data: null, error: err instanceof Error ? err : new Error('Failed to record attendance') };
   }
-
-  return { data, error: null };
 }
 
 export async function getLastAttendanceStatus(
   userId: string
 ): Promise<{ status: AttendanceStatus | null; error: Error | null }> {
-  const { data, error } = await supabase
-    .from(TABLE_NAME)
-    .select('status')
-    .eq('user_id', userId)
-    .order('timestamp', { ascending: false })
-    .limit(1)
-    .single();
+  try {
+    const response = await fetchFromSupabase(
+      `attendance?user_id=eq.${userId}&select=status&order=timestamp.desc&limit=1`
+    );
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      // No rows found
-      return { status: null, error: null };
+    const data = await response.json();
+
+    if (!response.ok) {
+      return { status: null, error: new Error(data.message || 'Failed to get status') };
     }
-    return { status: null, error: new Error(error.message) };
-  }
 
-  return { status: data?.status || null, error: null };
+    if (Array.isArray(data) && data.length > 0) {
+      return { status: data[0].status, error: null };
+    }
+
+    return { status: null, error: null };
+  } catch (err) {
+    return { status: null, error: err instanceof Error ? err : new Error('Failed to get status') };
+  }
 }
 
 export async function getTodayAttendance(
@@ -62,18 +90,21 @@ export async function getTodayAttendance(
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const { data, error } = await supabase
-    .from(TABLE_NAME)
-    .select('*')
-    .eq('user_id', userId)
-    .gte('timestamp', today.toISOString())
-    .order('timestamp', { ascending: true });
+  try {
+    const response = await fetchFromSupabase(
+      `attendance?user_id=eq.${userId}&timestamp=gte.${today.toISOString()}&select=*&order=timestamp.asc`
+    );
 
-  if (error) {
-    return { records: [], error: new Error(error.message) };
+    const data = await response.json();
+
+    if (!response.ok) {
+      return { records: [], error: new Error(data.message || 'Failed to get attendance') };
+    }
+
+    return { records: Array.isArray(data) ? data : [], error: null };
+  } catch (err) {
+    return { records: [], error: err instanceof Error ? err : new Error('Failed to get attendance') };
   }
-
-  return { records: data || [], error: null };
 }
 
 export async function getAttendanceByDateRange(
@@ -87,17 +118,19 @@ export async function getAttendanceByDateRange(
   const end = new Date(endDate);
   end.setHours(23, 59, 59, 999);
 
-  const { data, error } = await supabase
-    .from(TABLE_NAME)
-    .select('*')
-    .eq('user_id', userId)
-    .gte('timestamp', start.toISOString())
-    .lte('timestamp', end.toISOString())
-    .order('timestamp', { ascending: true });
+  try {
+    const response = await fetchFromSupabase(
+      `attendance?user_id=eq.${userId}&timestamp=gte.${start.toISOString()}&timestamp=lte.${end.toISOString()}&select=*&order=timestamp.asc`
+    );
 
-  if (error) {
-    return { records: [], error: new Error(error.message) };
+    const data = await response.json();
+
+    if (!response.ok) {
+      return { records: [], error: new Error(data.message || 'Failed to get attendance') };
+    }
+
+    return { records: Array.isArray(data) ? data : [], error: null };
+  } catch (err) {
+    return { records: [], error: err instanceof Error ? err : new Error('Failed to get attendance') };
   }
-
-  return { records: data || [], error: null };
 }

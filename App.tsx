@@ -6,7 +6,6 @@ import { Text, View, ActivityIndicator, TouchableOpacity, StyleSheet } from 'rea
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import AttendanceScreen from './src/screens/AttendanceScreen';
 import LocationsScreen from './src/screens/LocationsScreen';
-import HistoryScreen from './src/screens/HistoryScreen';
 import ReportScreen from './src/screens/ReportScreen';
 import AdminScreen from './src/screens/AdminScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
@@ -15,7 +14,6 @@ import SignUpScreen from './src/screens/auth/SignUpScreen';
 export type RootTabParamList = {
   CheckIn: undefined;
   Locations: undefined;
-  History: undefined;
   Report: undefined;
   Admin: undefined;
 };
@@ -26,7 +24,6 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
   const icons: Record<string, string> = {
     CheckIn: focused ? '✓' : '○',
     Locations: focused ? '◉' : '◎',
-    History: focused ? '▣' : '▢',
     Report: focused ? '▤' : '▧',
     Admin: focused ? '⚙' : '⚙',
   };
@@ -92,11 +89,6 @@ function MainApp() {
           name="Locations"
           component={LocationsScreen}
           options={{ tabBarLabel: 'Locations' }}
-        />
-        <Tab.Screen
-          name="History"
-          component={HistoryScreen}
-          options={{ tabBarLabel: 'History' }}
         />
         <Tab.Screen
           name="Report"

@@ -24,8 +24,22 @@ interface LocationTimeSummary {
   sessions: number;
 }
 
+interface DetailedRecord extends AttendanceRecord {
+  locationName: string;
+  duration?: number; // duration in minutes (only for check_out)
+}
+
 function formatDate(date: Date): string {
   return date.toISOString().split('T')[0];
+}
+
+function formatTime(timestamp: string): string {
+  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDateTime(timestamp: string): string {
+  const d = new Date(timestamp);
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 function formatDuration(minutes: number): string {
@@ -63,11 +77,12 @@ export default function ReportScreen() {
 
   const [startDate, setStartDate] = useState<Date>(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 7); // Default to last 7 days
+    d.setDate(1); // Default to first day of current month
     return d;
   });
   const [endDate, setEndDate] = useState<Date>(new Date());
   const [loading, setLoading] = useState(false);
+  const [detailedRecords, setDetailedRecords] = useState<DetailedRecord[]>([]);
   const [summaries, setSummaries] = useState<LocationTimeSummary[]>([]);
   const [totalTime, setTotalTime] = useState(0);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -75,6 +90,13 @@ export default function ReportScreen() {
   useEffect(() => {
     loadLocations();
   }, []);
+
+  // Auto-generate report when locations are loaded
+  useEffect(() => {
+    if (locations.length >= 0 && userId) {
+      generateReport();
+    }
+  }, [locations, userId]);
 
   const loadLocations = async () => {
     const { locations: locs } = await getLocations();
@@ -95,11 +117,15 @@ export default function ReportScreen() {
         return;
       }
 
-      // Calculate time per location
+      // Build detailed records with location names and durations
+      const detailed: DetailedRecord[] = [];
       const locationTimeMap = new Map<string, { name: string; minutes: number; sessions: number }>();
 
       for (let i = 0; i < records.length; i++) {
         const record = records[i];
+        const location = findNearestLocation(record.latitude, record.longitude, locations);
+        const locationName = location?.name || 'Unknown Location';
+        const locationId = location?.id || 'unknown';
 
         if (record.status === 'check_in') {
           // Find the matching check_out
@@ -107,22 +133,18 @@ export default function ReportScreen() {
             (r, idx) => idx > i && r.status === 'check_out'
           );
 
+          detailed.push({
+            ...record,
+            locationName,
+          });
+
           if (checkOutIndex !== -1) {
             const checkOut = records[checkOutIndex];
             const checkInTime = new Date(record.timestamp).getTime();
             const checkOutTime = new Date(checkOut.timestamp).getTime();
             const durationMinutes = (checkOutTime - checkInTime) / (1000 * 60);
 
-            // Find the location for this check-in
-            const location = findNearestLocation(
-              record.latitude,
-              record.longitude,
-              locations
-            );
-
-            const locationId = location?.id || 'unknown';
-            const locationName = location?.name || 'Unknown Location';
-
+            // Update summary map
             const existing = locationTimeMap.get(locationId);
             if (existing) {
               existing.minutes += durationMinutes;
@@ -135,10 +157,27 @@ export default function ReportScreen() {
               });
             }
           }
+        } else if (record.status === 'check_out') {
+          // Find the matching check_in before this check_out
+          let duration: number | undefined;
+          for (let j = i - 1; j >= 0; j--) {
+            if (records[j].status === 'check_in') {
+              const checkInTime = new Date(records[j].timestamp).getTime();
+              const checkOutTime = new Date(record.timestamp).getTime();
+              duration = (checkOutTime - checkInTime) / (1000 * 60);
+              break;
+            }
+          }
+
+          detailed.push({
+            ...record,
+            locationName,
+            duration,
+          });
         }
       }
 
-      // Convert to array and sort by time
+      // Convert summary map to array
       const summaryArray: LocationTimeSummary[] = [];
       let total = 0;
 
@@ -154,6 +193,7 @@ export default function ReportScreen() {
 
       summaryArray.sort((a, b) => b.totalMinutes - a.totalMinutes);
 
+      setDetailedRecords(detailed);
       setSummaries(summaryArray);
       setTotalTime(total);
     } catch (err) {
@@ -161,7 +201,7 @@ export default function ReportScreen() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, locations]);
+  }, [startDate, endDate, locations, userId]);
 
   const adjustDate = (which: 'start' | 'end', days: number) => {
     if (which === 'start') {
@@ -188,14 +228,26 @@ export default function ReportScreen() {
   };
 
   const exportCSV = async () => {
-    if (summaries.length === 0) {
-      Alert.alert('No Data', 'Generate a report first before exporting');
+    if (detailedRecords.length === 0) {
+      Alert.alert('No Data', 'No records to export');
       return;
     }
 
     try {
-      // Build CSV content
-      let csv = 'Location,Total Time,Hours,Sessions\n';
+      // Build CSV content with detailed records
+      let csv = 'Date,Time,Status,Location,Duration\n';
+
+      for (const record of detailedRecords) {
+        const date = new Date(record.timestamp).toLocaleDateString();
+        const time = formatTime(record.timestamp);
+        const status = record.status === 'check_in' ? 'Check In' : 'Check Out';
+        const duration = record.duration ? formatDuration(record.duration) : '';
+        csv += `"${date}","${time}","${status}","${record.locationName}","${duration}"\n`;
+      }
+
+      // Add summary section
+      csv += '\n\nSUMMARY BY LOCATION\n';
+      csv += 'Location,Total Time,Hours,Sessions\n';
 
       for (const summary of summaries) {
         const hours = (summary.totalMinutes / 60).toFixed(2);
@@ -209,7 +261,6 @@ export default function ReportScreen() {
       const filename = `attendance-report-${formatDate(startDate)}-to-${formatDate(endDate)}.csv`;
 
       if (Platform.OS === 'web') {
-        // Web: create downloadable link
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -219,7 +270,6 @@ export default function ReportScreen() {
         URL.revokeObjectURL(url);
         Alert.alert('Success', 'CSV file downloaded');
       } else {
-        // Native: use expo-file-system and expo-sharing
         const fileUri = FileSystem.documentDirectory + filename;
         await FileSystem.writeAsStringAsync(fileUri, csv, {
           encoding: FileSystem.EncodingType.UTF8,
@@ -255,15 +305,20 @@ export default function ReportScreen() {
           <View style={styles.presetButtons}>
             <TouchableOpacity
               style={styles.presetButton}
-              onPress={() => setPresetRange(7)}
+              onPress={() => {
+                const start = new Date();
+                start.setDate(1);
+                setStartDate(start);
+                setEndDate(new Date());
+              }}
             >
-              <Text style={styles.presetButtonText}>Last 7 days</Text>
+              <Text style={styles.presetButtonText}>This Month</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.presetButton}
-              onPress={() => setPresetRange(30)}
+              onPress={() => setPresetRange(7)}
             >
-              <Text style={styles.presetButtonText}>Last 30 days</Text>
+              <Text style={styles.presetButtonText}>Last 7 days</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.presetButton}
@@ -321,16 +376,16 @@ export default function ReportScreen() {
             {loading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.generateButtonText}>Generate Report</Text>
+              <Text style={styles.generateButtonText}>Apply Filter</Text>
             )}
           </TouchableOpacity>
         </View>
 
-        {/* Summary Table */}
-        {summaries.length > 0 && (
+        {/* Detailed Records */}
+        {detailedRecords.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Time Summary</Text>
+              <Text style={styles.sectionTitle}>Attendance Log</Text>
               <TouchableOpacity style={styles.exportButton} onPress={exportCSV}>
                 <Text style={styles.exportButtonText}>Export CSV</Text>
               </TouchableOpacity>
@@ -338,33 +393,81 @@ export default function ReportScreen() {
 
             <View style={styles.table}>
               <View style={styles.tableHeader}>
+                <Text style={[styles.tableHeaderCell, styles.dateTimeCell]}>Date/Time</Text>
+                <Text style={[styles.tableHeaderCell, styles.statusCell]}>Status</Text>
                 <Text style={[styles.tableHeaderCell, styles.locationCell]}>Location</Text>
-                <Text style={[styles.tableHeaderCell, styles.timeCell]}>Time</Text>
-                <Text style={[styles.tableHeaderCell, styles.sessionsCell]}>Sessions</Text>
+                <Text style={[styles.tableHeaderCell, styles.durationCell]}>Duration</Text>
+              </View>
+
+              {detailedRecords.map((record, index) => (
+                <View
+                  key={record.id || index}
+                  style={[
+                    styles.tableRow,
+                    index % 2 === 0 ? styles.tableRowEven : styles.tableRowOdd,
+                  ]}
+                >
+                  <Text style={[styles.tableCell, styles.dateTimeCell]}>
+                    {formatDateTime(record.timestamp)}
+                  </Text>
+                  <View style={[styles.tableCell, styles.statusCell]}>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        record.status === 'check_in' ? styles.statusIn : styles.statusOut,
+                      ]}
+                    >
+                      <Text style={styles.statusBadgeText}>
+                        {record.status === 'check_in' ? 'IN' : 'OUT'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.tableCell, styles.locationCell]} numberOfLines={1}>
+                    {record.locationName}
+                  </Text>
+                  <Text style={[styles.tableCell, styles.durationCell]}>
+                    {record.duration ? formatDuration(record.duration) : '-'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Summary by Location */}
+        {summaries.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Summary by Location</Text>
+
+            <View style={styles.table}>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.tableHeaderCell, styles.summaryLocationCell]}>Location</Text>
+                <Text style={[styles.tableHeaderCell, styles.summaryTimeCell]}>Total Time</Text>
+                <Text style={[styles.tableHeaderCell, styles.summarySessionsCell]}>Sessions</Text>
               </View>
 
               {summaries.map((summary) => (
                 <View key={summary.locationId} style={styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.locationCell]} numberOfLines={1}>
+                  <Text style={[styles.tableCell, styles.summaryLocationCell]} numberOfLines={1}>
                     {summary.locationName}
                   </Text>
-                  <Text style={[styles.tableCell, styles.timeCell]}>
+                  <Text style={[styles.tableCell, styles.summaryTimeCell]}>
                     {formatDuration(summary.totalMinutes)}
                   </Text>
-                  <Text style={[styles.tableCell, styles.sessionsCell]}>
+                  <Text style={[styles.tableCell, styles.summarySessionsCell]}>
                     {summary.sessions}
                   </Text>
                 </View>
               ))}
 
               <View style={[styles.tableRow, styles.totalRow]}>
-                <Text style={[styles.tableCell, styles.locationCell, styles.totalText]}>
+                <Text style={[styles.tableCell, styles.summaryLocationCell, styles.totalText]}>
                   TOTAL
                 </Text>
-                <Text style={[styles.tableCell, styles.timeCell, styles.totalText]}>
+                <Text style={[styles.tableCell, styles.summaryTimeCell, styles.totalText]}>
                   {formatDuration(totalTime)}
                 </Text>
-                <Text style={[styles.tableCell, styles.sessionsCell, styles.totalText]}>
+                <Text style={[styles.tableCell, styles.summarySessionsCell, styles.totalText]}>
                   {summaries.reduce((a, b) => a + b.sessions, 0)}
                 </Text>
               </View>
@@ -372,13 +475,15 @@ export default function ReportScreen() {
           </View>
         )}
 
-        {summaries.length === 0 && !loading && (
+        {detailedRecords.length === 0 && !loading && (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateText}>
-              Select a date range and tap "Generate Report" to see your time summary
+              No attendance records found for this date range
             </Text>
           </View>
         )}
+
+        <View style={styles.bottomPadding} />
       </ScrollView>
     </View>
   );
@@ -513,8 +618,8 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
   tableHeaderCell: {
-    padding: 12,
-    fontSize: 14,
+    padding: 10,
+    fontSize: 12,
     fontWeight: '600',
     color: '#333',
   },
@@ -522,20 +627,57 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
+    alignItems: 'center',
+  },
+  tableRowEven: {
+    backgroundColor: '#fff',
+  },
+  tableRowOdd: {
+    backgroundColor: '#fafafa',
   },
   tableCell: {
-    padding: 12,
-    fontSize: 14,
+    padding: 10,
+    fontSize: 12,
     color: '#333',
   },
+  dateTimeCell: {
+    width: 100,
+  },
+  statusCell: {
+    width: 50,
+    alignItems: 'center',
+  },
   locationCell: {
+    flex: 1,
+  },
+  durationCell: {
+    width: 60,
+    textAlign: 'right',
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  statusIn: {
+    backgroundColor: '#4CAF50',
+  },
+  statusOut: {
+    backgroundColor: '#f44336',
+  },
+  statusBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  summaryLocationCell: {
     flex: 2,
   },
-  timeCell: {
+  summaryTimeCell: {
     flex: 1,
     textAlign: 'center',
   },
-  sessionsCell: {
+  summarySessionsCell: {
     flex: 1,
     textAlign: 'center',
   },
@@ -555,5 +697,8 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     lineHeight: 24,
+  },
+  bottomPadding: {
+    height: 100,
   },
 });

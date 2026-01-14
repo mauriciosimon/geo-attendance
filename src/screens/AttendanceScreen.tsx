@@ -7,7 +7,16 @@ import {
   ActivityIndicator,
   Alert,
   ScrollView,
+  Platform,
 } from 'react-native';
+
+const showAlert = (title: string, message: string) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+};
 import * as Location from 'expo-location';
 import { useFocusEffect } from '@react-navigation/native';
 import { calculateDistance, formatDistance } from '../utils/geofencing';
@@ -156,7 +165,7 @@ export default function AttendanceScreen() {
 
   const handleCheckInOut = async () => {
     if (!coordinates || !selectedLocation) {
-      Alert.alert('Error', 'You must be inside a location to check in/out');
+      showAlert('Error', 'You must be inside a location to check in/out');
       return;
     }
 
@@ -178,18 +187,18 @@ export default function AttendanceScreen() {
       console.log('Record result:', { data, error: err });
 
       if (err) {
-        Alert.alert('Error', err.message);
+        showAlert('Error', err.message);
         return;
       }
 
       setLastStatus(newStatus);
       await fetchAttendanceHistory(allLocations); // Refresh history
-      Alert.alert(
+      showAlert(
         'Success',
         `${newStatus === 'check_in' ? 'Checked in' : 'Checked out'} at ${selectedLocation.name}!`
       );
     } catch (err) {
-      Alert.alert('Error', 'Failed to record attendance');
+      showAlert('Error', 'Failed to record attendance');
     } finally {
       setIsSubmitting(false);
     }
