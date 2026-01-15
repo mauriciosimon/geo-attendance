@@ -18,10 +18,13 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
-  deviceError: string | null;
+  deviceBlocked: boolean;
+  blockedUserEmail: string | null;
+  resetRequested: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  requestDeviceReset: () => Promise<boolean>;
   isAdmin: boolean;
   refreshProfile: () => Promise<void>;
 }
@@ -32,7 +35,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 async function getDeviceId(): Promise<string> {
   try {
     if (Platform.OS === 'web') {
-      // For web, use a combination of browser fingerprint stored in localStorage
       if (typeof window !== 'undefined' && window.localStorage) {
         let webDeviceId = window.localStorage.getItem('geo_attendance_device_id');
         if (!webDeviceId) {
@@ -43,11 +45,9 @@ async function getDeviceId(): Promise<string> {
       }
       return `web_${Date.now()}`;
     } else if (Platform.OS === 'ios' && Application) {
-      // iOS: Use identifierForVendor
       const iosId = await Application.getIosIdForVendorAsync();
       return iosId || `ios_${Date.now()}`;
     } else if (Application) {
-      // Android: Use androidId
       return Application.getAndroidId() || `android_${Date.now()}`;
     }
     return `native_${Date.now()}`;
@@ -57,24 +57,23 @@ async function getDeviceId(): Promise<string> {
   }
 }
 
-async function getAccessToken(): Promise<string> {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token || SUPABASE_ANON_KEY;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [deviceBlocked, setDeviceBlocked] = useState(false);
+  const [blockedUserId, setBlockedUserId] = useState<string | null>(null);
+  const [blockedUserEmail, setBlockedUserEmail] = useState<string | null>(null);
+  const [blockedAccessToken, setBlockedAccessToken] = useState<string | null>(null);
+  const [resetRequested, setResetRequested] = useState(false);
 
   const fetchProfile = async (userId: string, accessToken?: string): Promise<Profile | null> => {
     console.log('fetchProfile: Querying for userId', userId);
     try {
       const token = accessToken || SUPABASE_ANON_KEY;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       const response = await fetch(
         `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,
@@ -132,7 +131,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const verifyAndBindDevice = async (userProfile: Profile, userId: string, accessToken?: string): Promise<boolean> => {
+  const requestDeviceReset = async (): Promise<boolean> => {
+    if (!blockedUserId || !blockedAccessToken) {
+      console.error('No blocked user to request reset for');
+      return false;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${blockedUserId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${blockedAccessToken}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation',
+          },
+          body: JSON.stringify({ device_reset_requested: true }),
+          signal: controller.signal,
+        }
+      );
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        setResetRequested(true);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('requestDeviceReset: Exception', err);
+      return false;
+    }
+  };
+
+  const verifyAndBindDevice = async (
+    userProfile: Profile,
+    userId: string,
+    userEmail: string,
+    accessToken?: string
+  ): Promise<boolean> => {
     try {
       const currentDeviceId = await getDeviceId();
       console.log('Device verification:', {
@@ -160,33 +202,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Verify device matches
       if (userProfile.device_id !== currentDeviceId) {
         console.log('Device mismatch - blocking access');
-        setDeviceError('This account is registered to a different device. Contact your admin to change devices.');
+        setDeviceBlocked(true);
+        setBlockedUserId(userId);
+        setBlockedUserEmail(userEmail);
+        setBlockedAccessToken(accessToken || null);
+        setResetRequested(userProfile.device_reset_requested || false);
         return false;
       }
 
       return true;
     } catch (err) {
       console.error('Device verification error:', err);
-      // On error, allow access to avoid blocking users
       return true;
     }
   };
 
   const refreshProfile = async () => {
-    if (user) {
-      const profileData = await fetchProfile(user.id);
+    if (user && session) {
+      const profileData = await fetchProfile(user.id, session.access_token);
       if (profileData) {
-        const deviceOk = await verifyAndBindDevice(profileData, user.id);
+        const deviceOk = await verifyAndBindDevice(profileData, user.id, user.email || '', session.access_token);
         if (deviceOk) {
           setProfile(profileData);
-          setDeviceError(null);
+          setDeviceBlocked(false);
         }
       }
     }
   };
 
   useEffect(() => {
-    // Get initial session
     console.log('AuthContext: Getting session...');
     supabase.auth.getSession().then(async ({ data: { session }, error }) => {
       console.log('AuthContext: Session result', { session: !!session, error });
@@ -199,14 +243,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log('AuthContext: Profile fetched', profileData);
 
           if (profileData) {
-            const deviceOk = await verifyAndBindDevice(profileData, session.user.id, session.access_token);
+            const deviceOk = await verifyAndBindDevice(
+              profileData,
+              session.user.id,
+              session.user.email || '',
+              session.access_token
+            );
             if (deviceOk) {
               setProfile(profileData);
-            } else {
-              // Device mismatch - sign out
-              await supabase.auth.signOut();
-              setSession(null);
-              setUser(null);
+              setDeviceBlocked(false);
             }
           } else {
             setProfile(null);
@@ -222,7 +267,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
@@ -231,15 +275,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           try {
             const profileData = await fetchProfile(session.user.id, session.access_token);
             if (profileData) {
-              const deviceOk = await verifyAndBindDevice(profileData, session.user.id, session.access_token);
+              const deviceOk = await verifyAndBindDevice(
+                profileData,
+                session.user.id,
+                session.user.email || '',
+                session.access_token
+              );
               if (deviceOk) {
                 setProfile(profileData);
-                setDeviceError(null);
-              } else {
-                // Device mismatch - sign out
-                await supabase.auth.signOut();
-                setSession(null);
-                setUser(null);
+                setDeviceBlocked(false);
               }
             } else {
               setProfile(null);
@@ -250,7 +294,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         } else {
           setProfile(null);
-          setDeviceError(null);
+          setDeviceBlocked(false);
+          setBlockedUserId(null);
+          setBlockedUserEmail(null);
+          setBlockedAccessToken(null);
+          setResetRequested(false);
         }
         setLoading(false);
       }
@@ -260,7 +308,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    setDeviceError(null);
+    setDeviceBlocked(false);
+    setResetRequested(false);
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -297,7 +346,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setUser(null);
     setProfile(null);
-    setDeviceError(null);
+    setDeviceBlocked(false);
+    setBlockedUserId(null);
+    setBlockedUserEmail(null);
+    setBlockedAccessToken(null);
+    setResetRequested(false);
   };
 
   const isAdmin = profile?.role === 'admin';
@@ -309,10 +362,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         profile,
         loading,
-        deviceError,
+        deviceBlocked,
+        blockedUserEmail,
+        resetRequested,
         signIn,
         signUp,
         signOut,
+        requestDeviceReset,
         isAdmin,
         refreshProfile,
       }}

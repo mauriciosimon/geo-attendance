@@ -206,7 +206,7 @@ export default function AdminScreen() {
                 'Content-Type': 'application/json',
                 'Prefer': 'return=representation',
               },
-              body: JSON.stringify({ device_id: null }),
+              body: JSON.stringify({ device_id: null, device_reset_requested: false }),
             }
           );
 
@@ -237,8 +237,15 @@ export default function AdminScreen() {
             <View style={styles.deviceStatus}>
               <View style={[styles.deviceDot, item.device_id ? styles.deviceBound : styles.deviceUnbound]} />
               <Text style={styles.deviceText}>
-                {item.device_id ? 'Device registered' : 'No device'}
+                {item.device_id
+                  ? `Device: ...${item.device_id.slice(-6)}`
+                  : 'No device'}
               </Text>
+            </View>
+          )}
+          {item.device_reset_requested && (
+            <View style={styles.resetRequestBadge}>
+              <Text style={styles.resetRequestText}>Reset Requested</Text>
             </View>
           )}
         </View>
@@ -510,6 +517,21 @@ const styles = StyleSheet.create({
   deviceText: {
     fontSize: 12,
     color: '#666',
+  },
+  resetRequestBadge: {
+    backgroundColor: '#fff3e0',
+    borderWidth: 1,
+    borderColor: '#ff9800',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 6,
+    alignSelf: 'flex-start',
+  },
+  resetRequestText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#e65100',
   },
   resetDeviceButton: {
     backgroundColor: '#fff3e0',

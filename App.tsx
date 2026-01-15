@@ -10,6 +10,7 @@ import ReportScreen from './src/screens/ReportScreen';
 import AdminScreen from './src/screens/AdminScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
 import SignUpScreen from './src/screens/auth/SignUpScreen';
+import DeviceBlockedScreen from './src/screens/auth/DeviceBlockedScreen';
 
 export type RootTabParamList = {
   CheckIn: undefined;
@@ -45,7 +46,7 @@ function AuthScreens() {
 }
 
 function MainApp() {
-  const { loading, session, profile, signOut, isAdmin } = useAuth();
+  const { loading, session, profile, signOut, isAdmin, deviceBlocked } = useAuth();
 
   if (loading) {
     return (
@@ -58,6 +59,10 @@ function MainApp() {
 
   if (!session) {
     return <AuthScreens />;
+  }
+
+  if (deviceBlocked) {
+    return <DeviceBlockedScreen />;
   }
 
   return (

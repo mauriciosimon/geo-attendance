@@ -61,5 +61,6 @@ export interface Profile {
   full_name: string;
   role: UserRole;
   device_id?: string;
+  device_reset_requested?: boolean;
   created_at?: string;
 }
