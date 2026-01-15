@@ -11,12 +11,10 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import { supabase } from '../config/supabase';
+import { api } from '../config/api';
 import { Profile, AttendanceRecord, Location } from '../types';
 import { getLocations } from '../services/locationsService';
-
-const SUPABASE_URL = 'https://ifkutaryzkimyjyuiwfx.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlma3V0YXJ5emtpbXlqeXVpd2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMzE0MzAsImV4cCI6MjA4MzgwNzQzMH0.Xc4IHynmO0b7yJwx9ZzZjTNMWz99Jlp9p1OkAlH1veE';
+import { getAttendanceForUser } from '../services/attendanceService';
 
 const showAlert = (title: string, message: string) => {
   if (Platform.OS === 'web') {
@@ -45,13 +43,6 @@ interface AttendanceWithLocation extends AttendanceRecord {
 
 function formatDate(date: Date): string {
   return date.toISOString().split('T')[0];
-}
-
-function formatTime(timestamp: string): string {
-  return new Date(timestamp).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 function formatDateTime(timestamp: string): string {
@@ -84,34 +75,25 @@ export default function AdminScreen() {
 
   const fetchEmployees = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('full_name', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching employees:', error);
-        return;
-      }
-
+      const data = await api.get<Profile[]>('/api/users');
       setEmployees(data || []);
     } catch (err) {
-      console.error('Error:', err);
+      console.error('Error fetching employees:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  const fetchLocations = useCallback(async () => {
+  const fetchLocationsData = useCallback(async () => {
     const { locations: locs } = await getLocations();
     setLocations(locs);
   }, []);
 
   useEffect(() => {
     fetchEmployees();
-    fetchLocations();
-  }, [fetchEmployees, fetchLocations]);
+    fetchLocationsData();
+  }, [fetchEmployees, fetchLocationsData]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -123,37 +105,19 @@ export default function AdminScreen() {
     setAttendanceLoading(true);
 
     try {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
+      const { records } = await getAttendanceForUser(employee.id, startDate, endDate);
 
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-
-      let query = supabase
-        .from('attendance')
-        .select('*')
-        .eq('user_id', employee.id)
-        .gte('timestamp', start.toISOString())
-        .lte('timestamp', end.toISOString())
-        .order('timestamp', { ascending: false });
-
+      // Filter by location if selected and map location names
+      let filteredRecords = records;
       if (selectedLocationFilter) {
-        query = query.eq('location_id', selectedLocationFilter);
+        filteredRecords = records.filter((r: any) => r.location_id === selectedLocationFilter);
       }
 
-      const { data, error } = await query;
-
-      if (error) {
-        console.error('Error fetching attendance:', error);
-        return;
-      }
-
-      // Map location names
-      const attendanceWithLocations: AttendanceWithLocation[] = (data || []).map((record) => {
+      const attendanceWithLocations: AttendanceWithLocation[] = filteredRecords.map((record: any) => {
         const location = locations.find((l) => l.id === record.location_id);
         return {
           ...record,
-          location_name: location?.name || 'Unknown',
+          location_name: location?.name || record.location?.name || 'Unknown',
         };
       });
 
@@ -193,29 +157,9 @@ export default function AdminScreen() {
       `Are you sure you want to reset the device for ${employee.full_name}? They will be able to log in from a new device.`,
       async () => {
         try {
-          const { data: { session } } = await supabase.auth.getSession();
-          const token = session?.access_token || SUPABASE_ANON_KEY;
-
-          const response = await fetch(
-            `${SUPABASE_URL}/rest/v1/profiles?id=eq.${employee.id}`,
-            {
-              method: 'PATCH',
-              headers: {
-                'apikey': SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=representation',
-              },
-              body: JSON.stringify({ device_id: null, device_reset_requested: false }),
-            }
-          );
-
-          if (response.ok) {
-            showAlert('Success', `Device has been reset for ${employee.full_name}. They can now log in from a new device.`);
-            fetchEmployees(); // Refresh the list
-          } else {
-            showAlert('Error', 'Failed to reset device');
-          }
+          await api.post(`/api/users/${employee.id}/reset-device`);
+          showAlert('Success', `Device has been reset for ${employee.full_name}. They can now log in from a new device.`);
+          fetchEmployees(); // Refresh the list
         } catch (err) {
           console.error('Error resetting device:', err);
           showAlert('Error', 'Failed to reset device');

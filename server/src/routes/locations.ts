@@ -1,0 +1,82 @@
+import { Router, Response } from 'express';
+import { PrismaClient } from '@prisma/client';
+import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+
+const router = Router();
+const prisma = new PrismaClient();
+
+// Get all locations
+router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const locations = await prisma.location.findMany({
+      orderBy: { created_at: 'desc' },
+    });
+    res.json(locations);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create location (admin only)
+router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, latitude, longitude, radius_meters } = req.body;
+
+    if (!name || latitude === undefined || longitude === undefined || !radius_meters) {
+      return res.status(400).json({ error: 'Name, latitude, longitude, and radius_meters are required' });
+    }
+
+    const location = await prisma.location.create({
+      data: {
+        name,
+        latitude,
+        longitude,
+        radius_meters,
+        created_by: req.user!.user_id,
+      },
+    });
+
+    res.status(201).json(location);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update location (admin only)
+router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, latitude, longitude, radius_meters } = req.body;
+
+    const location = await prisma.location.update({
+      where: { id },
+      data: {
+        name,
+        latitude,
+        longitude,
+        radius_meters,
+      },
+    });
+
+    res.json(location);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete location (admin only)
+router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    await prisma.location.delete({
+      where: { id },
+    });
+
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+export default router;

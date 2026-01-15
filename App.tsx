@@ -46,7 +46,7 @@ function AuthScreens() {
 }
 
 function MainApp() {
-  const { loading, session, profile, signOut, isAdmin, deviceBlocked } = useAuth();
+  const { loading, user, signOut, isAdmin, deviceBlocked } = useAuth();
 
   if (loading) {
     return (
@@ -57,7 +57,7 @@ function MainApp() {
     );
   }
 
-  if (!session) {
+  if (!user) {
     return <AuthScreens />;
   }
 
@@ -112,7 +112,7 @@ function MainApp() {
       {/* User profile header with sign out */}
       <View style={styles.userBanner}>
         <Text style={styles.userText} numberOfLines={1}>
-          {profile?.full_name || profile?.email}
+          {user?.full_name || user?.email}
           {isAdmin && ' (Admin)'}
         </Text>
         <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
