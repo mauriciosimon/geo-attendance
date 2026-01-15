@@ -10,8 +10,13 @@ import {
   Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
-import * as LocalAuthentication from 'expo-local-authentication';
 import { useFocusEffect } from '@react-navigation/native';
+
+// Only import LocalAuthentication on native platforms
+let LocalAuthentication: any = null;
+if (Platform.OS !== 'web') {
+  LocalAuthentication = require('expo-local-authentication');
+}
 
 const showAlert = (title: string, message: string) => {
   if (Platform.OS === 'web') {
@@ -166,7 +171,7 @@ export default function AttendanceScreen() {
 
   const authenticateWithBiometrics = async (): Promise<boolean> => {
     // On web, skip biometric and just confirm
-    if (Platform.OS === 'web') {
+    if (Platform.OS === 'web' || !LocalAuthentication) {
       const confirmed = window.confirm('Confirm your identity to proceed with check-in/out');
       return confirmed;
     }
