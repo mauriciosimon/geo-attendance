@@ -17,7 +17,7 @@ interface LoginScreenProps {
 }
 
 export default function LoginScreen({ onNavigateToSignUp }: LoginScreenProps) {
-  const { signIn } = useAuth();
+  const { signIn, deviceError } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -54,6 +54,12 @@ export default function LoginScreen({ onNavigateToSignUp }: LoginScreenProps) {
         </View>
 
         <View style={styles.form}>
+          {deviceError && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorText}>{deviceError}</Text>
+            </View>
+          )}
+
           <Text style={styles.label}>Email</Text>
           <TextInput
             style={styles.input}
@@ -176,5 +182,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#007AFF',
     fontWeight: '600',
+  },
+  errorBanner: {
+    backgroundColor: '#ffebee',
+    borderWidth: 1,
+    borderColor: '#f44336',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorText: {
+    color: '#c62828',
+    fontSize: 14,
+    textAlign: 'center',
   },
 });

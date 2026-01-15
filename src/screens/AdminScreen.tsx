@@ -8,10 +8,36 @@ import {
   ActivityIndicator,
   Modal,
   RefreshControl,
+  Alert,
+  Platform,
 } from 'react-native';
 import { supabase } from '../config/supabase';
 import { Profile, AttendanceRecord, Location } from '../types';
 import { getLocations } from '../services/locationsService';
+
+const SUPABASE_URL = 'https://ifkutaryzkimyjyuiwfx.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlma3V0YXJ5emtpbXlqeXVpd2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMzE0MzAsImV4cCI6MjA4MzgwNzQzMH0.Xc4IHynmO0b7yJwx9ZzZjTNMWz99Jlp9p1OkAlH1veE';
+
+const showAlert = (title: string, message: string) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+};
+
+const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n\n${message}`)) {
+      onConfirm();
+    }
+  } else {
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reset', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
 
 interface AttendanceWithLocation extends AttendanceRecord {
   location_name?: string;
@@ -161,21 +187,76 @@ export default function AdminScreen() {
     }
   };
 
+  const resetDeviceForEmployee = async (employee: Profile) => {
+    showConfirm(
+      'Reset Device',
+      `Are you sure you want to reset the device for ${employee.full_name}? They will be able to log in from a new device.`,
+      async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token || SUPABASE_ANON_KEY;
+
+          const response = await fetch(
+            `${SUPABASE_URL}/rest/v1/profiles?id=eq.${employee.id}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation',
+              },
+              body: JSON.stringify({ device_id: null }),
+            }
+          );
+
+          if (response.ok) {
+            showAlert('Success', `Device has been reset for ${employee.full_name}. They can now log in from a new device.`);
+            fetchEmployees(); // Refresh the list
+          } else {
+            showAlert('Error', 'Failed to reset device');
+          }
+        } catch (err) {
+          console.error('Error resetting device:', err);
+          showAlert('Error', 'Failed to reset device');
+        }
+      }
+    );
+  };
+
   const renderEmployee = ({ item }: { item: Profile }) => (
-    <TouchableOpacity
-      style={styles.employeeCard}
-      onPress={() => fetchEmployeeAttendance(item)}
-    >
-      <View style={styles.employeeInfo}>
-        <Text style={styles.employeeName}>{item.full_name}</Text>
-        <Text style={styles.employeeEmail}>{item.email}</Text>
-      </View>
-      <View style={[styles.roleBadge, item.role === 'admin' && styles.adminBadge]}>
-        <Text style={[styles.roleText, item.role === 'admin' && styles.adminRoleText]}>
-          {item.role}
-        </Text>
-      </View>
-    </TouchableOpacity>
+    <View style={styles.employeeCard}>
+      <TouchableOpacity
+        style={styles.employeeMainArea}
+        onPress={() => fetchEmployeeAttendance(item)}
+      >
+        <View style={styles.employeeInfo}>
+          <Text style={styles.employeeName}>{item.full_name}</Text>
+          <Text style={styles.employeeEmail}>{item.email}</Text>
+          {item.role !== 'admin' && (
+            <View style={styles.deviceStatus}>
+              <View style={[styles.deviceDot, item.device_id ? styles.deviceBound : styles.deviceUnbound]} />
+              <Text style={styles.deviceText}>
+                {item.device_id ? 'Device registered' : 'No device'}
+              </Text>
+            </View>
+          )}
+        </View>
+        <View style={[styles.roleBadge, item.role === 'admin' && styles.adminBadge]}>
+          <Text style={[styles.roleText, item.role === 'admin' && styles.adminRoleText]}>
+            {item.role}
+          </Text>
+        </View>
+      </TouchableOpacity>
+      {item.role !== 'admin' && item.device_id && (
+        <TouchableOpacity
+          style={styles.resetDeviceButton}
+          onPress={() => resetDeviceForEmployee(item)}
+        >
+          <Text style={styles.resetDeviceText}>Reset Device</Text>
+        </TouchableOpacity>
+      )}
+    </View>
   );
 
   const renderAttendanceRecord = ({ item }: { item: AttendanceWithLocation }) => (
@@ -392,19 +473,56 @@ const styles = StyleSheet.create({
   employeeCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 16,
     marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    overflow: 'hidden',
+  },
+  employeeMainArea: {
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   employeeInfo: {
     flex: 1,
+  },
+  deviceStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  deviceDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  deviceBound: {
+    backgroundColor: '#4CAF50',
+  },
+  deviceUnbound: {
+    backgroundColor: '#9e9e9e',
+  },
+  deviceText: {
+    fontSize: 12,
+    color: '#666',
+  },
+  resetDeviceButton: {
+    backgroundColor: '#fff3e0',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    alignItems: 'center',
+  },
+  resetDeviceText: {
+    color: '#e65100',
+    fontSize: 13,
+    fontWeight: '600',
   },
   employeeName: {
     fontSize: 16,

@@ -9,6 +9,9 @@ import {
   ScrollView,
   Platform,
 } from 'react-native';
+import * as Location from 'expo-location';
+import * as LocalAuthentication from 'expo-local-authentication';
+import { useFocusEffect } from '@react-navigation/native';
 
 const showAlert = (title: string, message: string) => {
   if (Platform.OS === 'web') {
@@ -17,8 +20,6 @@ const showAlert = (title: string, message: string) => {
     Alert.alert(title, message);
   }
 };
-import * as Location from 'expo-location';
-import { useFocusEffect } from '@react-navigation/native';
 import { calculateDistance, formatDistance } from '../utils/geofencing';
 import { recordAttendance, getLastAttendanceStatus, getTodayAttendance } from '../services/attendanceService';
 import { getLocations } from '../services/locationsService';
@@ -163,9 +164,73 @@ export default function AttendanceScreen() {
     }
   }, [allLocations, fetchLocation]);
 
+  const authenticateWithBiometrics = async (): Promise<boolean> => {
+    // On web, skip biometric and just confirm
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Confirm your identity to proceed with check-in/out');
+      return confirmed;
+    }
+
+    try {
+      // Check if hardware is available
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      if (!hasHardware) {
+        showAlert('Not Available', 'Biometric authentication is not available on this device');
+        return false;
+      }
+
+      // Check if biometrics are enrolled
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!isEnrolled) {
+        showAlert('Not Set Up', 'Please set up Face ID, fingerprint, or device PIN in your device settings');
+        return false;
+      }
+
+      // Get supported authentication types
+      const supportedTypes = await LocalAuthentication.supportedAuthenticationTypesAsync();
+      const hasFaceId = supportedTypes.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+      const hasFingerprint = supportedTypes.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
+
+      let promptMessage = 'Verify your identity to check in/out';
+      if (hasFaceId) {
+        promptMessage = 'Use Face ID to verify your identity';
+      } else if (hasFingerprint) {
+        promptMessage = 'Use fingerprint to verify your identity';
+      }
+
+      // Authenticate
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage,
+        fallbackLabel: 'Use PIN',
+        disableDeviceFallback: false,
+      });
+
+      if (result.success) {
+        return true;
+      } else {
+        if (result.error === 'user_cancel') {
+          showAlert('Cancelled', 'Authentication was cancelled');
+        } else {
+          showAlert('Failed', 'Authentication failed. Please try again.');
+        }
+        return false;
+      }
+    } catch (err) {
+      console.error('Biometric auth error:', err);
+      showAlert('Error', 'Failed to authenticate');
+      return false;
+    }
+  };
+
   const handleCheckInOut = async () => {
     if (!coordinates || !selectedLocation) {
       showAlert('Error', 'You must be inside a location to check in/out');
+      return;
+    }
+
+    // Require biometric authentication first
+    const authenticated = await authenticateWithBiometrics();
+    if (!authenticated) {
       return;
     }
 

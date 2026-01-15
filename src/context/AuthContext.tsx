@@ -1,13 +1,19 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { Platform } from 'react-native';
 import { Session, User } from '@supabase/supabase-js';
+import * as Application from 'expo-application';
 import { supabase } from '../config/supabase';
 import { Profile } from '../types';
+
+const SUPABASE_URL = 'https://ifkutaryzkimyjyuiwfx.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlma3V0YXJ5emtpbXlqeXVpd2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMzE0MzAsImV4cCI6MjA4MzgwNzQzMH0.Xc4IHynmO0b7yJwx9ZzZjTNMWz99Jlp9p1OkAlH1veE';
 
 interface AuthContextType {
   session: Session | null;
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+  deviceError: string | null;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
@@ -17,22 +23,48 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Get unique device identifier
+async function getDeviceId(): Promise<string> {
+  if (Platform.OS === 'web') {
+    // For web, use a combination of browser fingerprint stored in localStorage
+    let webDeviceId = localStorage.getItem('geo_attendance_device_id');
+    if (!webDeviceId) {
+      webDeviceId = `web_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      localStorage.setItem('geo_attendance_device_id', webDeviceId);
+    }
+    return webDeviceId;
+  } else if (Platform.OS === 'ios') {
+    // iOS: Use identifierForVendor
+    const iosId = await Application.getIosIdForVendorAsync();
+    return iosId || `ios_${Date.now()}`;
+  } else {
+    // Android: Use androidId
+    return Application.getAndroidId() || `android_${Date.now()}`;
+  }
+}
+
+async function getAccessToken(): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token || SUPABASE_ANON_KEY;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deviceError, setDeviceError] = useState<string | null>(null);
 
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
     console.log('fetchProfile: Querying for userId', userId);
     try {
-      // Use fetch directly to avoid Supabase client issues
+      const token = await getAccessToken();
       const response = await fetch(
-        `https://ifkutaryzkimyjyuiwfx.supabase.co/rest/v1/profiles?id=eq.${userId}&select=*`,
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,
         {
           headers: {
-            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlma3V0YXJ5emtpbXlqeXVpd2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMzE0MzAsImV4cCI6MjA4MzgwNzQzMH0.Xc4IHynmO0b7yJwx9ZzZjTNMWz99Jlp9p1OkAlH1veE',
-            'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlma3V0YXJ5emtpbXlqeXVpd2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMzE0MzAsImV4cCI6MjA4MzgwNzQzMH0.Xc4IHynmO0b7yJwx9ZzZjTNMWz99Jlp9p1OkAlH1veE`,
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${token}`,
           },
         }
       );
@@ -50,27 +82,102 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateDeviceId = async (userId: string, deviceId: string): Promise<boolean> => {
+    try {
+      const token = await getAccessToken();
+      const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation',
+          },
+          body: JSON.stringify({ device_id: deviceId }),
+        }
+      );
+
+      return response.ok;
+    } catch (err) {
+      console.error('updateDeviceId: Exception', err);
+      return false;
+    }
+  };
+
+  const verifyAndBindDevice = async (userProfile: Profile, userId: string): Promise<boolean> => {
+    const currentDeviceId = await getDeviceId();
+    console.log('Device verification:', {
+      profileDeviceId: userProfile.device_id,
+      currentDeviceId,
+      isAdmin: userProfile.role === 'admin'
+    });
+
+    // Admins bypass device binding
+    if (userProfile.role === 'admin') {
+      return true;
+    }
+
+    // If no device_id set, this is first login - bind the device
+    if (!userProfile.device_id) {
+      console.log('First login - binding device');
+      const success = await updateDeviceId(userId, currentDeviceId);
+      if (success) {
+        userProfile.device_id = currentDeviceId;
+      }
+      return true;
+    }
+
+    // Verify device matches
+    if (userProfile.device_id !== currentDeviceId) {
+      console.log('Device mismatch - blocking access');
+      setDeviceError('This account is registered to a different device. Contact your admin to change devices.');
+      return false;
+    }
+
+    return true;
+  };
+
   const refreshProfile = async () => {
     if (user) {
       const profileData = await fetchProfile(user.id);
-      setProfile(profileData);
+      if (profileData) {
+        const deviceOk = await verifyAndBindDevice(profileData, user.id);
+        if (deviceOk) {
+          setProfile(profileData);
+          setDeviceError(null);
+        }
+      }
     }
   };
 
   useEffect(() => {
     // Get initial session
     console.log('AuthContext: Getting session...');
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
+    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
       console.log('AuthContext: Session result', { session: !!session, error });
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
         console.log('AuthContext: Fetching profile for', session.user.id);
-        fetchProfile(session.user.id).then((profile) => {
-          console.log('AuthContext: Profile fetched', profile);
-          setProfile(profile);
-          setLoading(false);
-        });
+        const profileData = await fetchProfile(session.user.id);
+        console.log('AuthContext: Profile fetched', profileData);
+
+        if (profileData) {
+          const deviceOk = await verifyAndBindDevice(profileData, session.user.id);
+          if (deviceOk) {
+            setProfile(profileData);
+          } else {
+            // Device mismatch - sign out
+            await supabase.auth.signOut();
+            setSession(null);
+            setUser(null);
+          }
+        } else {
+          setProfile(null);
+        }
+        setLoading(false);
       } else {
         setLoading(false);
       }
@@ -86,9 +193,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null);
         if (session?.user) {
           const profileData = await fetchProfile(session.user.id);
-          setProfile(profileData);
+          if (profileData) {
+            const deviceOk = await verifyAndBindDevice(profileData, session.user.id);
+            if (deviceOk) {
+              setProfile(profileData);
+              setDeviceError(null);
+            } else {
+              // Device mismatch - sign out
+              await supabase.auth.signOut();
+              setSession(null);
+              setUser(null);
+            }
+          } else {
+            setProfile(null);
+          }
         } else {
           setProfile(null);
+          setDeviceError(null);
         }
         setLoading(false);
       }
@@ -98,6 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    setDeviceError(null);
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -134,6 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setUser(null);
     setProfile(null);
+    setDeviceError(null);
   };
 
   const isAdmin = profile?.role === 'admin';
@@ -145,6 +268,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         profile,
         loading,
+        deviceError,
         signIn,
         signUp,
         signOut,

@@ -60,5 +60,6 @@ export interface Profile {
   email: string;
   full_name: string;
   role: UserRole;
+  device_id?: string;
   created_at?: string;
 }
