@@ -4,20 +4,11 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-// Register
+// Register - DISABLED (users are created by admin only)
 router.post('/register', async (req: Request, res: Response) => {
-  try {
-    const { email, password, full_name } = req.body;
-
-    if (!email || !password || !full_name) {
-      return res.status(400).json({ error: 'Email, password, and full_name are required' });
-    }
-
-    const result = await register(email, password, full_name);
-    res.json(result);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
-  }
+  return res.status(403).json({
+    error: 'Public registration is disabled. Please contact your administrator to create an account.'
+  });
 });
 
 // Login

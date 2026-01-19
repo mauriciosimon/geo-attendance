@@ -12,24 +12,28 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 
-interface LoginScreenProps {
-  onNavigateToSignUp: () => void;
-}
+const showAlert = (title: string, message: string) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+};
 
-export default function LoginScreen({ onNavigateToSignUp }: LoginScreenProps) {
-  const { signIn, deviceError } = useAuth();
+export default function LoginScreen() {
+  const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
     if (!email.trim()) {
-      Alert.alert('Error', 'Please enter your email');
+      showAlert('Error', 'Please enter your email');
       return;
     }
 
     if (!password) {
-      Alert.alert('Error', 'Please enter your password');
+      showAlert('Error', 'Please enter your password');
       return;
     }
 
@@ -38,7 +42,7 @@ export default function LoginScreen({ onNavigateToSignUp }: LoginScreenProps) {
     setLoading(false);
 
     if (error) {
-      Alert.alert('Login Failed', error.message);
+      showAlert('Login Failed', error.message);
     }
   };
 
@@ -54,12 +58,6 @@ export default function LoginScreen({ onNavigateToSignUp }: LoginScreenProps) {
         </View>
 
         <View style={styles.form}>
-          {deviceError && (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorText}>{deviceError}</Text>
-            </View>
-          )}
-
           <Text style={styles.label}>Email</Text>
           <TextInput
             style={styles.input}
@@ -94,10 +92,7 @@ export default function LoginScreen({ onNavigateToSignUp }: LoginScreenProps) {
         </View>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Don't have an account?</Text>
-          <TouchableOpacity onPress={onNavigateToSignUp}>
-            <Text style={styles.linkText}>Sign Up</Text>
-          </TouchableOpacity>
+          <Text style={styles.footerText}>Contact your administrator for account access</Text>
         </View>
       </View>
     </KeyboardAvoidingView>

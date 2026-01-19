@@ -13,6 +13,14 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 
+const showAlert = (title: string, message: string) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+};
+
 interface SignUpScreenProps {
   onNavigateToLogin: () => void;
 }
@@ -27,27 +35,27 @@ export default function SignUpScreen({ onNavigateToLogin }: SignUpScreenProps) {
 
   const handleSignUp = async () => {
     if (!fullName.trim()) {
-      Alert.alert('Error', 'Please enter your full name');
+      showAlert('Error', 'Please enter your full name');
       return;
     }
 
     if (!email.trim()) {
-      Alert.alert('Error', 'Please enter your email');
+      showAlert('Error', 'Please enter your email');
       return;
     }
 
     if (!password) {
-      Alert.alert('Error', 'Please enter a password');
+      showAlert('Error', 'Please enter a password');
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+      showAlert('Error', 'Password must be at least 6 characters');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      showAlert('Error', 'Passwords do not match');
       return;
     }
 
@@ -56,14 +64,9 @@ export default function SignUpScreen({ onNavigateToLogin }: SignUpScreenProps) {
     setLoading(false);
 
     if (error) {
-      Alert.alert('Sign Up Failed', error.message);
-    } else {
-      Alert.alert(
-        'Account Created',
-        'Please check your email to verify your account, then sign in.',
-        [{ text: 'OK', onPress: onNavigateToLogin }]
-      );
+      showAlert('Sign Up Failed', error.message);
     }
+    // On success, AuthContext sets the user and app navigates automatically
   };
 
   return (

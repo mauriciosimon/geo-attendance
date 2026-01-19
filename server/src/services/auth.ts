@@ -20,8 +20,11 @@ export interface AuthResult {
 export async function register(
   email: string,
   password: string,
-  fullName: string
+  fullName: string,
+  deviceId?: string
 ): Promise<AuthResult> {
+  console.log('Register called with device_id:', deviceId);
+
   const existingUser = await prisma.user.findUnique({ where: { email } });
   if (existingUser) {
     throw new Error('Email already registered');
@@ -35,8 +38,11 @@ export async function register(
       password_hash,
       full_name: fullName,
       role: 'employee',
+      device_id: deviceId || null, // Bind device at signup time
     },
   });
+
+  console.log('User created with device_id:', user.device_id);
 
   const token = generateToken(user);
   const { password_hash: _, ...userWithoutPassword } = user;
@@ -54,6 +60,8 @@ export async function login(email: string, password: string): Promise<AuthResult
   if (!validPassword) {
     throw new Error('Invalid email or password');
   }
+
+  console.log('Login - user device_id from database:', user.device_id);
 
   const token = generateToken(user);
   const { password_hash: _, ...userWithoutPassword } = user;

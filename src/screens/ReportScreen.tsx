@@ -17,6 +17,14 @@ import { useAuth } from '../context/AuthContext';
 import { AttendanceRecord, Location } from '../types';
 import { calculateDistance } from '../utils/geofencing';
 
+const showAlert = (title: string, message: string) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+};
+
 interface LocationTimeSummary {
   locationId: string;
   locationName: string;
@@ -113,7 +121,7 @@ export default function ReportScreen() {
       );
 
       if (error) {
-        Alert.alert('Error', error.message);
+        showAlert('Error', error.message);
         return;
       }
 
@@ -197,7 +205,7 @@ export default function ReportScreen() {
       setSummaries(summaryArray);
       setTotalTime(total);
     } catch (err) {
-      Alert.alert('Error', 'Failed to generate report');
+      showAlert('Error', 'Failed to generate report');
     } finally {
       setLoading(false);
     }
@@ -229,7 +237,7 @@ export default function ReportScreen() {
 
   const exportCSV = async () => {
     if (detailedRecords.length === 0) {
-      Alert.alert('No Data', 'No records to export');
+      showAlert('No Data', 'No records to export');
       return;
     }
 
@@ -268,7 +276,7 @@ export default function ReportScreen() {
         a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
-        Alert.alert('Success', 'CSV file downloaded');
+        showAlert('Success', 'CSV file downloaded');
       } else {
         const fileUri = FileSystem.documentDirectory + filename;
         await FileSystem.writeAsStringAsync(fileUri, csv, {
@@ -282,11 +290,11 @@ export default function ReportScreen() {
             dialogTitle: 'Export Attendance Report',
           });
         } else {
-          Alert.alert('Success', `File saved to: ${fileUri}`);
+          showAlert('Success', `File saved to: ${fileUri}`);
         }
       }
     } catch (err) {
-      Alert.alert('Error', 'Failed to export CSV');
+      showAlert('Error', 'Failed to export CSV');
       console.error(err);
     }
   };

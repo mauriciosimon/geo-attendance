@@ -10,6 +10,8 @@ import {
   RefreshControl,
   Alert,
   Platform,
+  TextInput,
+  ScrollView,
 } from 'react-native';
 import { api } from '../config/api';
 import { Profile, AttendanceRecord, Location } from '../types';
@@ -63,6 +65,16 @@ export default function AdminScreen() {
   const [selectedEmployee, setSelectedEmployee] = useState<Profile | null>(null);
   const [employeeAttendance, setEmployeeAttendance] = useState<AttendanceWithLocation[]>([]);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
+
+  // Create user modal
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [createUserLoading, setCreateUserLoading] = useState(false);
+  const [newUserForm, setNewUserForm] = useState({
+    full_name: '',
+    email: '',
+    password: '',
+  });
+  const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
 
   // Filters
   const [startDate, setStartDate] = useState<Date>(() => {
@@ -168,6 +180,59 @@ export default function AdminScreen() {
     );
   };
 
+  const toggleLocationSelection = (locationId: string) => {
+    setSelectedLocationIds((prev) =>
+      prev.includes(locationId)
+        ? prev.filter((id) => id !== locationId)
+        : [...prev, locationId]
+    );
+  };
+
+  const resetCreateUserForm = () => {
+    setNewUserForm({ full_name: '', email: '', password: '' });
+    setSelectedLocationIds([]);
+  };
+
+  const handleCreateUser = async () => {
+    const { full_name, email, password } = newUserForm;
+
+    if (!full_name.trim()) {
+      showAlert('Error', 'Please enter the user\'s full name');
+      return;
+    }
+    if (!email.trim()) {
+      showAlert('Error', 'Please enter the user\'s email');
+      return;
+    }
+    if (!password || password.length < 6) {
+      showAlert('Error', 'Password must be at least 6 characters');
+      return;
+    }
+    if (selectedLocationIds.length === 0) {
+      showAlert('Error', 'Please assign at least one location to the user');
+      return;
+    }
+
+    setCreateUserLoading(true);
+    try {
+      await api.post('/api/users', {
+        full_name: full_name.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+        location_ids: selectedLocationIds,
+      });
+      showAlert('Success', `User "${full_name}" has been created successfully`);
+      setShowCreateUser(false);
+      resetCreateUserForm();
+      fetchEmployees();
+    } catch (err: any) {
+      console.error('Error creating user:', err);
+      showAlert('Error', err.message || 'Failed to create user');
+    } finally {
+      setCreateUserLoading(false);
+    }
+  };
+
   const renderEmployee = ({ item }: { item: Profile }) => (
     <View style={styles.employeeCard}>
       <TouchableOpacity
@@ -240,8 +305,18 @@ export default function AdminScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Admin Panel</Text>
-        <Text style={styles.subtitle}>{employees.length} employees</Text>
+        <View style={styles.headerTop}>
+          <View>
+            <Text style={styles.title}>Admin Panel</Text>
+            <Text style={styles.subtitle}>{employees.length} employees</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.createUserButton}
+            onPress={() => setShowCreateUser(true)}
+          >
+            <Text style={styles.createUserButtonText}>+ Create User</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -383,6 +458,120 @@ export default function AdminScreen() {
                 }
               />
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Create User Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showCreateUser}
+        onRequestClose={() => {
+          setShowCreateUser(false);
+          resetCreateUserForm();
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Create New User</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => {
+                  setShowCreateUser(false);
+                  resetCreateUserForm();
+                }}
+              >
+                <Text style={styles.closeButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.createUserForm}>
+              <Text style={styles.formLabel}>Full Name</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="Enter full name"
+                value={newUserForm.full_name}
+                onChangeText={(text) =>
+                  setNewUserForm((prev) => ({ ...prev, full_name: text }))
+                }
+                autoCapitalize="words"
+              />
+
+              <Text style={styles.formLabel}>Email</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="Enter email address"
+                value={newUserForm.email}
+                onChangeText={(text) =>
+                  setNewUserForm((prev) => ({ ...prev, email: text }))
+                }
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              <Text style={styles.formLabel}>Password</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="Enter password (min 6 characters)"
+                value={newUserForm.password}
+                onChangeText={(text) =>
+                  setNewUserForm((prev) => ({ ...prev, password: text }))
+                }
+                secureTextEntry
+              />
+
+              <Text style={styles.formLabel}>Assign Locations</Text>
+              <Text style={styles.formHint}>
+                Select the locations this user can check in from
+              </Text>
+              <View style={styles.locationCheckboxes}>
+                {locations.map((loc) => (
+                  <TouchableOpacity
+                    key={loc.id}
+                    style={[
+                      styles.locationCheckbox,
+                      selectedLocationIds.includes(loc.id!) && styles.locationCheckboxSelected,
+                    ]}
+                    onPress={() => toggleLocationSelection(loc.id!)}
+                  >
+                    <View
+                      style={[
+                        styles.checkbox,
+                        selectedLocationIds.includes(loc.id!) && styles.checkboxSelected,
+                      ]}
+                    >
+                      {selectedLocationIds.includes(loc.id!) && (
+                        <Text style={styles.checkmark}>✓</Text>
+                      )}
+                    </View>
+                    <Text style={styles.locationCheckboxText}>{loc.name}</Text>
+                  </TouchableOpacity>
+                ))}
+                {locations.length === 0 && (
+                  <Text style={styles.noLocationsText}>
+                    No locations available. Create locations first.
+                  </Text>
+                )}
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  createUserLoading && styles.submitButtonDisabled,
+                ]}
+                onPress={handleCreateUser}
+                disabled={createUserLoading}
+              >
+                {createUserLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Create User</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -694,5 +883,108 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
+  },
+  // Header styles
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  createUserButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  createUserButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Create user form styles
+  createUserForm: {
+    padding: 20,
+  },
+  formLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    marginTop: 16,
+  },
+  formHint: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 12,
+  },
+  formInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 14,
+    fontSize: 16,
+    backgroundColor: '#fafafa',
+  },
+  locationCheckboxes: {
+    gap: 8,
+  },
+  locationCheckbox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  locationCheckboxSelected: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#007AFF',
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  locationCheckboxText: {
+    fontSize: 15,
+    color: '#333',
+    flex: 1,
+  },
+  noLocationsText: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
+  submitButton: {
+    backgroundColor: '#007AFF',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 40,
+  },
+  submitButtonDisabled: {
+    backgroundColor: '#99c9ff',
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

@@ -5,12 +5,33 @@ import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 const router = Router();
 const prisma = new PrismaClient();
 
-// Get all locations
+// Get locations (admins see all, employees see only assigned)
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const locations = await prisma.location.findMany({
-      orderBy: { created_at: 'desc' },
+    const userId = req.user!.user_id;
+    const userRole = req.user!.role;
+
+    // Admins see all locations
+    if (userRole === 'admin') {
+      const locations = await prisma.location.findMany({
+        orderBy: { created_at: 'desc' },
+      });
+      return res.json(locations);
+    }
+
+    // Employees only see assigned locations
+    const userWithLocations = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        assignedLocations: {
+          select: {
+            location: true,
+          },
+        },
+      },
     });
+
+    const locations = userWithLocations?.assignedLocations.map((al) => al.location) || [];
     res.json(locations);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

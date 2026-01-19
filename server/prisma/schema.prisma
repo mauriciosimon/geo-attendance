@@ -22,8 +22,9 @@ model User {
   device_reset_requested Boolean  @default(false)
   created_at             DateTime @default(now())
 
-  locations  Location[]
-  attendance Attendance[]
+  createdLocations  Location[]       @relation("LocationCreator")
+  assignedLocations UserLocation[]
+  attendance        Attendance[]
 
   @@map("users")
 }
@@ -37,10 +38,24 @@ model Location {
   created_by    String
   created_at    DateTime @default(now())
 
-  creator    User         @relation(fields: [created_by], references: [id])
-  attendance Attendance[]
+  creator       User           @relation("LocationCreator", fields: [created_by], references: [id])
+  assignedUsers UserLocation[]
+  attendance    Attendance[]
 
   @@map("locations")
+}
+
+model UserLocation {
+  id          String   @id @default(uuid())
+  user_id     String
+  location_id String
+  assigned_at DateTime @default(now())
+
+  user     User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [location_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, location_id])
+  @@map("user_locations")
 }
 
 model Attendance {

@@ -16,7 +16,6 @@ interface AuthContextType {
   blockedUserEmail: string | null;
   resetRequested: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   requestDeviceReset: () => Promise<boolean>;
   isAdmin: boolean;
@@ -161,29 +160,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       });
 
-      await api.setToken(result.token);
-
-      const deviceOk = await verifyAndBindDevice(result.user);
-      if (deviceOk) {
-        setUser(result.user);
-      }
-
-      return { error: null };
-    } catch (error: any) {
-      return { error: new Error(error.message) };
-    }
-  };
-
-  const signUp = async (email: string, password: string, fullName: string) => {
-    try {
-      const result = await api.post<{ user: Profile; token: string }>('/api/auth/register', {
-        email,
-        password,
-        full_name: fullName,
+      console.log('SignIn - user from server:', {
+        email: result.user.email,
+        device_id: result.user.device_id,
+        role: result.user.role,
       });
 
       await api.setToken(result.token);
-      setUser(result.user);
+
+      const deviceOk = await verifyAndBindDevice(result.user);
+      console.log('SignIn - device verification result:', deviceOk);
+
+      if (deviceOk) {
+        setUser(result.user);
+      }
 
       return { error: null };
     } catch (error: any) {
@@ -221,7 +211,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         blockedUserEmail,
         resetRequested,
         signIn,
-        signUp,
         signOut,
         requestDeviceReset,
         isAdmin,

@@ -10,8 +10,32 @@ import {
   RefreshControl,
   Modal,
   TextInput,
+  Platform,
 } from 'react-native';
 import * as ExpoLocation from 'expo-location';
+
+const showAlert = (title: string, message: string, buttons?: Array<{text: string; style?: string; onPress?: () => void}>) => {
+  if (Platform.OS === 'web') {
+    if (buttons && buttons.length > 1) {
+      // For confirm dialogs on web
+      const confirmed = window.confirm(`${title}\n\n${message}`);
+      if (confirmed) {
+        const destructiveButton = buttons.find(b => b.style === 'destructive');
+        if (destructiveButton?.onPress) {
+          destructiveButton.onPress();
+        }
+      }
+    } else {
+      window.alert(`${title}\n\n${message}`);
+    }
+  } else {
+    if (buttons) {
+      Alert.alert(title, message, buttons as any);
+    } else {
+      Alert.alert(title, message);
+    }
+  }
+};
 import { createLocation, getLocations, deleteLocationById, updateLocation } from '../services/locationsService';
 import { useAuth } from '../context/AuthContext';
 import { Location, Coordinates } from '../types';
@@ -73,7 +97,7 @@ export default function LocationsScreen() {
   };
 
   const handleDelete = (item: Location) => {
-    Alert.alert(
+    showAlert(
       'Delete Location',
       `Are you sure you want to delete "${item.name}"?`,
       [
@@ -85,7 +109,7 @@ export default function LocationsScreen() {
             if (!item.id) return;
             const { error: err } = await deleteLocationById(item.id);
             if (err) {
-              Alert.alert('Error', err.message);
+              showAlert('Error', err.message);
             } else {
               setLocations((prev) => prev.filter((loc) => loc.id !== item.id));
             }
@@ -100,22 +124,21 @@ export default function LocationsScreen() {
     try {
       const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Error', 'Location permission denied');
+        showAlert('Error', 'Location permission denied. Please allow location access in your browser settings.');
         return;
       }
 
       const location = await ExpoLocation.getCurrentPositionAsync({
         accuracy: ExpoLocation.Accuracy.High,
-        maximumAge: 0, // Force fresh location, no cache
-        timeout: 15000, // 15 second timeout
       });
 
       setCoordinates({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
       });
-    } catch (err) {
-      Alert.alert('Error', 'Failed to get current location');
+    } catch (err: any) {
+      console.error('Location error:', err);
+      showAlert('Error', `Failed to get current location: ${err.message || 'Unknown error'}`);
     } finally {
       setIsGettingLocation(false);
     }
@@ -132,18 +155,18 @@ export default function LocationsScreen() {
 
   const handleSaveLocation = async () => {
     if (!name.trim()) {
-      Alert.alert('Error', 'Please enter a location name');
+      showAlert('Error', 'Please enter a location name');
       return;
     }
 
     if (!coordinates) {
-      Alert.alert('Error', 'Please set coordinates using "Use Current Location"');
+      showAlert('Error', 'Please set coordinates using "Use Current Location"');
       return;
     }
 
     const radius = getEffectiveRadius();
     if (!radius) {
-      Alert.alert('Error', 'Please enter a valid radius');
+      showAlert('Error', 'Please enter a valid radius');
       return;
     }
 
@@ -159,7 +182,7 @@ export default function LocationsScreen() {
         });
 
         if (err) {
-          Alert.alert('Error', err.message);
+          showAlert('Error', err.message);
           return;
         }
 
@@ -169,7 +192,7 @@ export default function LocationsScreen() {
           );
         }
 
-        Alert.alert('Success', 'Location updated!');
+        showAlert('Success', 'Location updated!');
       } else {
         // Create new location
         const { data, error: err } = await createLocation(
@@ -180,7 +203,7 @@ export default function LocationsScreen() {
         );
 
         if (err) {
-          Alert.alert('Error', err.message);
+          showAlert('Error', err.message);
           return;
         }
 
@@ -188,7 +211,7 @@ export default function LocationsScreen() {
           setLocations((prev) => [data, ...prev]);
         }
 
-        Alert.alert('Success', 'Location saved!');
+        showAlert('Success', 'Location saved!');
       }
 
       // Reset form
@@ -200,7 +223,7 @@ export default function LocationsScreen() {
       setEditingLocation(null);
       setModalVisible(false);
     } catch (err) {
-      Alert.alert('Error', 'Failed to save location');
+      showAlert('Error', 'Failed to save location');
     } finally {
       setIsSaving(false);
     }

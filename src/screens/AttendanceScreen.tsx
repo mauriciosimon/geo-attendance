@@ -25,6 +25,94 @@ const showAlert = (title: string, message: string) => {
     Alert.alert(title, message);
   }
 };
+
+// Get unique device identifier (same logic as AuthContext)
+async function getDeviceId(): Promise<string> {
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        let webDeviceId = window.localStorage.getItem('geo_attendance_device_id');
+        if (!webDeviceId) {
+          webDeviceId = `web_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+          window.localStorage.setItem('geo_attendance_device_id', webDeviceId);
+        }
+        return webDeviceId;
+      }
+      return `web_${Date.now()}`;
+    }
+    return `native_${Date.now()}`;
+  } catch {
+    return `fallback_${Date.now()}`;
+  }
+}
+
+// Parse user agent to get readable device info
+function getDeviceInfo(): { device: string; browser: string; os: string } {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') {
+    return { device: 'Mobile App', browser: 'Native', os: Platform.OS };
+  }
+
+  const ua = navigator.userAgent;
+
+  // Detect device
+  let device = 'Unknown Device';
+  if (/iPhone/.test(ua)) {
+    device = 'iPhone';
+  } else if (/iPad/.test(ua)) {
+    device = 'iPad';
+  } else if (/Macintosh/.test(ua)) {
+    device = 'Mac';
+  } else if (/Windows/.test(ua)) {
+    device = 'Windows PC';
+  } else if (/Android/.test(ua)) {
+    if (/Mobile/.test(ua)) {
+      device = 'Android Phone';
+    } else {
+      device = 'Android Tablet';
+    }
+  } else if (/Linux/.test(ua)) {
+    device = 'Linux PC';
+  }
+
+  // Detect browser
+  let browser = 'Unknown Browser';
+  if (/CriOS/.test(ua)) {
+    browser = 'Chrome (iOS)';
+  } else if (/Chrome/.test(ua) && !/Edg/.test(ua)) {
+    browser = 'Chrome';
+  } else if (/Safari/.test(ua) && !/Chrome/.test(ua)) {
+    browser = 'Safari';
+  } else if (/Firefox/.test(ua)) {
+    browser = 'Firefox';
+  } else if (/Edg/.test(ua)) {
+    browser = 'Edge';
+  }
+
+  // Detect OS
+  let os = 'Unknown OS';
+  if (/iPhone|iPad|iPod/.test(ua)) {
+    const match = ua.match(/OS (\d+)_(\d+)/);
+    os = match ? `iOS ${match[1]}.${match[2]}` : 'iOS';
+  } else if (/Mac OS X/.test(ua)) {
+    const match = ua.match(/Mac OS X (\d+)[_.](\d+)/);
+    os = match ? `macOS ${match[1]}.${match[2]}` : 'macOS';
+  } else if (/Windows NT/.test(ua)) {
+    const version = ua.match(/Windows NT (\d+\.\d+)/);
+    const winVersions: Record<string, string> = {
+      '10.0': 'Windows 10/11',
+      '6.3': 'Windows 8.1',
+      '6.2': 'Windows 8',
+      '6.1': 'Windows 7',
+    };
+    os = version ? (winVersions[version[1]] || 'Windows') : 'Windows';
+  } else if (/Android/.test(ua)) {
+    const match = ua.match(/Android (\d+(\.\d+)?)/);
+    os = match ? `Android ${match[1]}` : 'Android';
+  }
+
+  return { device, browser, os };
+}
+
 import { calculateDistance, formatDistance } from '../utils/geofencing';
 import { recordAttendance, getLastAttendanceStatus, getTodayAttendance } from '../services/attendanceService';
 import { getLocations } from '../services/locationsService';
@@ -48,6 +136,14 @@ export default function AttendanceScreen() {
   const [nearbyLocations, setNearbyLocations] = useState<NearbyLocation[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<NearbyLocation | null>(null);
   const [attendanceHistory, setAttendanceHistory] = useState<AttendanceHistoryItem[]>([]);
+  const [currentDeviceId, setCurrentDeviceId] = useState<string>('');
+  const [deviceInfo, setDeviceInfo] = useState<{ device: string; browser: string; os: string }>({ device: '', browser: '', os: '' });
+
+  // Fetch current device ID and info on mount
+  useEffect(() => {
+    getDeviceId().then(setCurrentDeviceId);
+    setDeviceInfo(getDeviceInfo());
+  }, []);
 
   const fetchLocations = useCallback(async () => {
     const { locations } = await getLocations();
@@ -129,8 +225,6 @@ export default function AttendanceScreen() {
 
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
-        maximumAge: 0, // Force fresh location, no cache
-        timeout: 15000, // 15 second timeout
       });
 
       const coords: Coordinates = {
@@ -172,7 +266,7 @@ export default function AttendanceScreen() {
   const authenticateWithBiometrics = async (): Promise<boolean> => {
     // On web, skip biometric and just confirm
     if (Platform.OS === 'web' || !LocalAuthentication) {
-      const confirmed = window.confirm('Confirm your identity to proceed with check-in/out');
+      const confirmed = window.confirm('Confirm your device to proceed with check-in/out');
       return confirmed;
     }
 
@@ -425,6 +519,53 @@ export default function AttendanceScreen() {
             Add locations in the Locations tab to enable check-in
           </Text>
         )}
+      </View>
+
+      {/* Device Info Card */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Device Info</Text>
+
+        <View style={styles.deviceInfoSection}>
+          <Text style={styles.deviceInfoSectionTitle}>This Device</Text>
+          <View style={styles.deviceInfoRow}>
+            <Text style={styles.deviceInfoLabel}>Type:</Text>
+            <Text style={styles.deviceInfoValue}>{deviceInfo.device}</Text>
+          </View>
+          <View style={styles.deviceInfoRow}>
+            <Text style={styles.deviceInfoLabel}>Browser:</Text>
+            <Text style={styles.deviceInfoValue}>{deviceInfo.browser}</Text>
+          </View>
+          <View style={styles.deviceInfoRow}>
+            <Text style={styles.deviceInfoLabel}>OS:</Text>
+            <Text style={styles.deviceInfoValue}>{deviceInfo.os}</Text>
+          </View>
+          <View style={styles.deviceInfoRow}>
+            <Text style={styles.deviceInfoLabel}>ID:</Text>
+            <Text style={styles.deviceIdText} selectable numberOfLines={1}>{currentDeviceId}</Text>
+          </View>
+        </View>
+
+        <View style={styles.deviceInfoSection}>
+          <Text style={styles.deviceInfoSectionTitle}>Registered Device</Text>
+          <View style={styles.deviceInfoRow}>
+            <Text style={styles.deviceInfoLabel}>ID:</Text>
+            <Text style={styles.deviceIdText} selectable numberOfLines={1}>
+              {(user as any)?.device_id || 'None'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={[
+          styles.deviceMatchBanner,
+          { backgroundColor: currentDeviceId === (user as any)?.device_id ? '#e8f5e9' : '#ffebee' }
+        ]}>
+          <Text style={[
+            styles.deviceMatchText,
+            { color: currentDeviceId === (user as any)?.device_id ? '#2e7d32' : '#c62828' }
+          ]}>
+            {currentDeviceId === (user as any)?.device_id ? '✓ Device Verified' : '✗ Device Mismatch'}
+          </Text>
+        </View>
       </View>
 
       {/* Today's History Card */}
@@ -703,5 +844,50 @@ const styles = StyleSheet.create({
   },
   statusDotOut: {
     backgroundColor: '#f44336',
+  },
+  deviceInfoSection: {
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  deviceInfoSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  deviceInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  deviceInfoLabel: {
+    fontSize: 13,
+    color: '#666',
+    width: 70,
+  },
+  deviceInfoValue: {
+    fontSize: 13,
+    color: '#333',
+    flex: 1,
+    textAlign: 'right',
+  },
+  deviceIdText: {
+    fontSize: 11,
+    color: '#888',
+    fontFamily: 'monospace',
+    flex: 1,
+    textAlign: 'right',
+  },
+  deviceMatchBanner: {
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  deviceMatchText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

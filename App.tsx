@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -9,7 +9,6 @@ import LocationsScreen from './src/screens/LocationsScreen';
 import ReportScreen from './src/screens/ReportScreen';
 import AdminScreen from './src/screens/AdminScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
-import SignUpScreen from './src/screens/auth/SignUpScreen';
 import DeviceBlockedScreen from './src/screens/auth/DeviceBlockedScreen';
 
 export type RootTabParamList = {
@@ -36,13 +35,7 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 }
 
 function AuthScreens() {
-  const [showSignUp, setShowSignUp] = useState(false);
-
-  if (showSignUp) {
-    return <SignUpScreen onNavigateToLogin={() => setShowSignUp(false)} />;
-  }
-
-  return <LoginScreen onNavigateToSignUp={() => setShowSignUp(true)} />;
+  return <LoginScreen />;
 }
 
 function MainApp() {
@@ -57,12 +50,13 @@ function MainApp() {
     );
   }
 
-  if (!user) {
-    return <AuthScreens />;
-  }
-
+  // Check deviceBlocked BEFORE checking user - when blocked, user is null
   if (deviceBlocked) {
     return <DeviceBlockedScreen />;
+  }
+
+  if (!user) {
+    return <AuthScreens />;
   }
 
   return (
